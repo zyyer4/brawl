@@ -214,7 +214,7 @@ local THEMES = {
 -- NEW THEMES (palettes)
 ------------------------------------------------------------------------
 local Scenes = {
-	order = { "light", "dark", "lava", "ice", "space", "murim", "hunter" },
+	order = { "light", "dark", "lava", "ice", "space", "murim", "hunter", "jungle", "fnaf" },
 	neonA = PINK,
 	neonB = TEAL,
 }
@@ -289,6 +289,30 @@ do
 		bg = C(10, 8, 26), white = C(12, 14, 40), green = C(80, 230, 200), red = C(255, 80, 110),
 		rose = C(200, 110, 255), aqua = C(90, 200, 255), violet = C(172, 122, 255),
 		pinkHover = C(140, 172, 255), creamHover = C(34, 40, 92), knob = C(228, 238, 255), onPink = C(8, 10, 34),
+	})
+
+	THEMES.jungle = variant({
+		label = "Jungle", icon = "🦖", scene = "jungle", card = 0.3, dim = 1,
+		bgTop = C(8, 36, 28), bgBot = C(112, 138, 52),
+		neonA = C(255, 190, 60), neonB = C(110, 220, 120),
+		ink_b = C(6, 22, 12), ink_t = C(240, 246, 214), ink_s = C(6, 22, 12),
+		cream_b = C(28, 64, 34), cream_t = C(250, 246, 220), cream_s = C(8, 26, 14),
+		pink = C(255, 176, 52), teal = C(104, 214, 120), muted = C(170, 196, 140), off = C(54, 82, 50),
+		bg = C(14, 40, 24), white = C(18, 46, 26), green = C(150, 236, 100), red = C(255, 92, 72),
+		rose = C(255, 140, 86), aqua = C(120, 230, 160), violet = C(210, 200, 110),
+		pinkHover = C(255, 200, 96), creamHover = C(46, 92, 50), knob = C(250, 244, 214), onPink = C(26, 18, 4),
+	})
+
+	THEMES.fnaf = variant({
+		label = "FNAF", icon = "🐻", scene = "fnaf", card = 0.32, dim = 1,
+		bgTop = C(8, 4, 4), bgBot = C(40, 12, 10),
+		neonA = C(255, 60, 50), neonB = C(255, 196, 70),
+		ink_b = C(6, 2, 2), ink_t = C(244, 226, 206), ink_s = C(6, 2, 2),
+		cream_b = C(46, 20, 16), cream_t = C(250, 236, 214), cream_s = C(14, 4, 2),
+		pink = C(208, 40, 40), teal = C(224, 170, 60), muted = C(176, 138, 118), off = C(78, 46, 40),
+		bg = C(22, 10, 8), white = C(28, 12, 10), green = C(120, 210, 100), red = C(255, 70, 60),
+		rose = C(255, 100, 90), aqua = C(255, 208, 110), violet = C(190, 120, 150),
+		pinkHover = C(240, 70, 60), creamHover = C(76, 34, 28), knob = C(246, 232, 208), onPink = C(255, 244, 230),
 	})
 end
 
@@ -393,6 +417,18 @@ do
 			rimA = C(146, 232, 255), rimM = C(152, 122, 255), rimB = C(40, 40, 112), rimT = 0.25, glow = C(120, 160, 255),
 			hl = C(130, 170, 255), hlT = 0.88, vigT = 0.5, frameC = C(120, 200, 255), frameT = 0.55,
 			pen = 0.6, penC = C(2, 0, 14),
+		},
+		jungle = { -- carved wood + gold leaf
+			shade = C(10, 30, 6), shadeT = 0.55, gloss = 0.9, glossC = C(255, 240, 170),
+			rimA = C(255, 214, 120), rimB = C(30, 70, 24), rimT = 0.28, glow = C(255, 190, 60),
+			hl = C(255, 230, 140), hlT = 0.9, vigT = 0.45, frameC = C(255, 200, 90), frameT = 0.6,
+			pen = 0.6, penC = C(2, 14, 2), metal = true,
+		},
+		fnaf = { -- scratched animatronic plating, red eye glow
+			shade = C(10, 0, 0), shadeT = 0.5, gloss = 0.94, glossC = C(255, 190, 170),
+			rimA = C(255, 170, 140), rimB = C(70, 10, 10), rimT = 0.3, glow = C(255, 60, 50),
+			hl = C(255, 90, 70), hlT = 0.9, vigT = 0.4, frameC = C(255, 80, 60), frameT = 0.6,
+			pen = 0.55, penC = C(0, 0, 0), metal = true,
 		},
 	}
 end
@@ -652,7 +688,6 @@ Skin.window(window, shadow)
 
 ------------------------------------------------------------------------
 -- NEW: animated 3D theme scenes (real parts, lit + depth-sorted, drawn in a ViewportFrame)
--- Replaces the whole old "NEW: animated theme scenes" do-block (the pixel-sprite one).
 ------------------------------------------------------------------------
 do
 	local C = Color3.fromRGB
@@ -683,6 +718,7 @@ do
 	local bg = mk("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = C(255, 255, 255), BorderSizePixel = 0 }, scene)
 	local grad = mk("UIGradient", { Rotation = 90 }, bg)
 	local layer = mk("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 1 }, scene) -- 2D glows (behind the 3D)
+	local overlay = mk("Frame", { Name = "Overlay", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 3 }, scene)
 	local vp = mk("ViewportFrame", {
 		Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 2,
 		Ambient = C(120, 120, 140), LightColor = C(255, 255, 255), LightDirection = V3(-0.5, -1, -0.6),
@@ -991,6 +1027,211 @@ do
 		end)
 	end
 
+	local WOOD, GRASS, FABRIC = Enum.Material.Wood, Enum.Material.Grass, Enum.Material.Fabric
+
+	-- jagged lightning between two points (thin neon boxes that fade out)
+	local function bolt(p0, p1, col, life, segs, jag, th)
+		segs, jag, th = segs or 6, jag or 0.45, th or 0.07
+		local pts = { p0 }
+		for i = 1, segs - 1 do
+			pts[#pts + 1] = p0:Lerp(p1, i / segs) + V3(rng:NextNumber(-jag, jag), rng:NextNumber(-jag, jag), 0)
+		end
+		pts[#pts + 1] = p1
+		local parts, t0 = {}, os.clock()
+		for i = 1, #pts - 1 do
+			local a, b = pts[i], pts[i + 1]
+			parts[i] = box(world, V3((b - a).Magnitude, th, th), col, CF((a + b) / 2) * ANG(0, 0, math.atan2(b.Y - a.Y, b.X - a.X)), NEON)
+		end
+		anim(function(_, t)
+			local f = (t - t0) / life
+			if f >= 1 then
+				for _, p in ipairs(parts) do p:Destroy() end
+				return false
+			end
+			for _, p in ipairs(parts) do p.Transparency = f * f end
+		end)
+	end
+
+	----------------------------------------------------------------
+	-- the Hunter (dual neon daggers). Faces local +X.
+	----------------------------------------------------------------
+	local function slashAng(e)
+		if e < 0.25 then return 1.1 + 1.5 * (e / 0.25) end
+		return 2.6 - 2.4 * math.sqrt((e - 0.25) / 0.75)
+	end
+
+	local function hunter3d()
+		local K = 1.5
+		local model = mk("Model", {}, world)
+		local rig, legs, arms, tails = {}, {}, {}, {}
+		local coat, dark, skin, hair = C(46, 42, 86), C(14, 12, 30), C(238, 206, 184), C(8, 6, 16)
+		local function S(size, col, pos, rot, mat)
+			local p = ellipsoid(model, size * K, col, CF(), mat)
+			rig[#rig + 1] = { p, CF(pos * K) * (rot or CF()) }
+			return p
+		end
+		S(V3(0.72, 1.0, 0.86), coat, V3(0, 0.1, 0))
+		S(V3(0.78, 0.62, 1.0), coat, V3(0, 0.62, 0))
+		S(V3(0.52, 0.22, 0.56), dark, V3(0.02, 0.98, 0))
+		S(V3(0.8, 0.14, 0.9), dark, V3(0, -0.3, 0))
+		S(V3(0.56, 0.62, 0.56), skin, V3(0.04, 1.3, 0))
+		S(V3(0.64, 0.4, 0.62), hair, V3(-0.04, 1.52, 0))
+		S(V3(0.36, 0.34, 0.58), hair, V3(-0.3, 1.36, 0))
+		S(V3(0.26, 0.2, 0.6), hair, V3(0.2, 1.58, 0), ANG(0, 0, rad(-20)))
+		for s = -1, 1, 2 do
+			S(V3(0.1, 0.08, 0.14), C(206, 140, 255), V3(0.31, 1.3, 0.14 * s), nil, NEON)
+			legs[#legs + 1] = {
+				s = s,
+				p = ellipsoid(model, V3(0.34, 1.05, 0.34) * K, dark, CF()),
+				boot = ellipsoid(model, V3(0.58, 0.22, 0.4) * K, dark, CF()),
+			}
+			arms[#arms + 1] = {
+				s = s,
+				p = ellipsoid(model, V3(0.28, 0.95, 0.28) * K, coat, CF()),
+				grip = ellipsoid(model, V3(0.2, 0.2, 0.2) * K, dark, CF()),
+				blade = box(model, V3(0.06, 1.2, 0.2) * K, C(176, 120, 255), CF(), NEON),
+			}
+			tails[#tails + 1] = { s = s, p = ellipsoid(model, V3(0.34, 1.0, 0.3) * K, coat, CF()) }
+		end
+		-- run: 0..1 blend, slash: 0..1 phase or nil, side: which arm slashes. Returns the blade tip while slashing.
+		local function update(root, t, run, slash, side)
+			for _, e in ipairs(rig) do e[1].CFrame = root * e[2] end
+			for _, l in ipairs(legs) do
+				local ang = 0.28 * l.s * (1 - run) + sin(t * 13 + (l.s == 1 and 0 or pi)) * 0.85 * run
+				local hip = root * CF(0, -0.42 * K, 0.24 * K * l.s) * ANG(0, 0, ang)
+				l.p.CFrame = hip * CF(0, -0.52 * K, 0)
+				l.boot.CFrame = hip * CF(0.12 * K, -1.02 * K, 0)
+			end
+			local tip
+			for _, a in ipairs(arms) do
+				local idle = (a.s == side and 1.15 or 0.7) + sin(t * 2) * 0.05
+				local th = idle * (1 - run) + (0.55 + sin(t * 13 + (a.s == 1 and pi or 0)) * 0.8) * run
+				if slash then th = (a.s == side) and slashAng(slash) or 0.9 end
+				local sh = root * CF(0, 0.72 * K, 0.56 * K * a.s) * ANG(0, 0, th)
+				a.p.CFrame = sh * CF(0, -0.45 * K, 0)
+				a.grip.CFrame = sh * CF(0, -0.95 * K, 0)
+				a.blade.CFrame = sh * CF(0, -1.6 * K, 0)
+				if slash and a.s == side then tip = (sh * CF(0, -2.2 * K, 0)).Position end
+			end
+			for _, c in ipairs(tails) do
+				local sw = -(0.12 + run * 0.55 + sin(t * 6 + c.s) * 0.07)
+				c.p.CFrame = root * CF(-0.3 * K, -0.35 * K, 0.26 * K * c.s) * ANG(0, 0, sw) * CF(0, -0.45 * K, 0)
+			end
+			return tip
+		end
+		return { model = model, update = update }
+	end
+
+	----------------------------------------------------------------
+	-- generic two-legged dino (T-rex / raptor). Faces local +X.
+	----------------------------------------------------------------
+	local function theropod(pal, p)
+		local K, f, hd = p.K, p.fat, p.head
+		local model = mk("Model", {}, world)
+		local rig, tail, legs = {}, {}, {}
+		local function S(size, col, pos, rot, mat)
+			local e = ellipsoid(model, size * K, col, CF(), mat)
+			rig[#rig + 1] = { e, CF(pos * K) * (rot or CF()) }
+			return e
+		end
+		S(V3(3.2, 1.9 * f + 0.3, 1.5 * f + 0.2), pal.body, V3(0, 0, 0))
+		S(V3(2.4, 0.8 * f + 0.2, 1.2 * f + 0.1), pal.belly, V3(0.15, -0.5 * f - 0.05, 0))
+		S(V3(1.6, 1.5 * f + 0.2, 1.3 * f + 0.1), pal.body, V3(1.1, 0.2, 0))
+		S(V3(1.5, 0.8 * f + 0.2, 0.7 * f + 0.15), pal.body, V3(1.9, 0.9, 0), ANG(0, 0, rad(35)))
+		for i = 1, 4 do
+			S(V3(0.55, 0.25, 0.5 * f + 0.1), pal.stripe, V3(1.2 - i * 0.55, 0.9 * f + 0.15, 0))
+		end
+		local H = V3(2.5 + 0.4 * hd, 1.35, 0)
+		S(V3(1.9, 1.0, 0.95) * hd, pal.body, H)
+		S(V3(1.0, 0.6, 0.7) * hd, pal.body, H + V3(0.85 * hd, -0.05, 0))
+		for s = -1, 1, 2 do
+			S(V3(0.2, 0.2, 0.12) * hd + V3(0.04, 0.04, 0.04), pal.eye, H + V3(0.35 * hd, 0.3 * hd, 0.44 * hd * s), nil, NEON)
+			S(V3(0.5, 0.18, 0.18) * p.arm, pal.body, V3(1.55, -0.55 * f - 0.15, (0.7 * f + 0.05) * s), ANG(0, 0, rad(-35)))
+		end
+		local jaw = ellipsoid(model, V3(1.5, 0.3, 0.6) * hd * K, pal.belly, CF())
+		for i = 1, p.tailN do
+			local sz = math.max(0.12, (0.9 * f + 0.1) * (1 - i / (p.tailN + 1)))
+			tail[i] = ellipsoid(model, V3(0.9, sz, sz) * K, i % 2 == 0 and pal.stripe or pal.body, CF())
+		end
+		for s = -1, 1, 2 do
+			legs[#legs + 1] = {
+				s = s,
+				th = ellipsoid(model, V3(0.85 * f + 0.15, p.l1 * 1.1, 0.7 * f + 0.15) * K, pal.body, CF()),
+				sh = ellipsoid(model, V3(0.4, p.l2 * 1.1, 0.4) * K, pal.body, CF()),
+				ft = box(model, V3(0.9, 0.2, 0.45) * K, pal.belly, CF()),
+			}
+		end
+		local function update(root, t, open)
+			for _, e in ipairs(rig) do e[1].CFrame = root * e[2] end
+			for i, e in ipairs(tail) do
+				e.CFrame = root * CF((-1.3 - i * p.tailStep) * K, ((0.15 - i * 0.04) + sin(t * 3 - i * 0.7) * 0.03 * i) * K, sin(t * p.speed * 0.5 - i * 0.6) * 0.07 * i * K)
+			end
+			jaw.CFrame = root * CF((H.X - 0.1 * hd) * K, (H.Y - 0.42 * hd) * K, 0) * ANG(0, 0, -(open or 0)) * CF(0.5 * hd * K, -0.04 * K, 0)
+			for _, l in ipairs(legs) do
+				local ph = t * p.speed + (l.s == 1 and 0 or pi)
+				local hip = root * CF(-0.2 * K, -0.6 * K, (0.7 * f + 0.05) * K * l.s) * ANG(0, 0, sin(ph) * p.swing)
+				l.th.CFrame = hip * CF(0, -p.l1 * 0.5 * K, 0)
+				local knee = hip * CF(0, -p.l1 * K, 0) * ANG(0, 0, -math.max(0, cos(ph)) * 0.9 - 0.15)
+				l.sh.CFrame = knee * CF(0, -p.l2 * 0.5 * K, 0)
+				l.ft.CFrame = knee * CF(0.3 * K, -(p.l2 + 0.05) * K, 0)
+			end
+		end
+		return { model = model, update = update, h = (0.6 + p.l1 + p.l2 + 0.15) * K }
+	end
+
+	----------------------------------------------------------------
+	-- FNAF animatronic (freddy / bonnie / chica). Faces local +Z (toward the camera).
+	----------------------------------------------------------------
+	local function animatronic(kind)
+		local PAL = {
+			freddy = { body = C(112, 72, 38), belly = C(198, 164, 112), acc = C(14, 12, 12) },
+			bonnie = { body = C(96, 60, 156), belly = C(152, 122, 204), acc = C(190, 32, 44) },
+			chica = { body = C(238, 198, 40), belly = C(250, 238, 206), acc = C(242, 132, 30) },
+		}
+		local pal = PAL[kind]
+		local K = 1.15
+		local model = mk("Model", {}, world)
+		local rig = {}
+		local BLACK, WHITE = C(10, 10, 12), C(236, 242, 255)
+		local function S(size, col, pos, rot, mat)
+			local e = ellipsoid(model, size * K, col, CF(), mat)
+			rig[#rig + 1] = { e, CF(pos * K) * (rot or CF()) }
+			return e
+		end
+		S(V3(2.0, 2.4, 1.5), pal.body, V3(0, 0, 0))
+		S(V3(1.4, 1.5, 0.6), pal.belly, V3(0, -0.1, 0.55))
+		S(V3(1.9, 1.5, 1.5), pal.body, V3(0, 2.0, 0))
+		if kind == "chica" then
+			S(V3(1.0, 0.3, 0.8), pal.acc, V3(0, 1.8, 0.85))
+			S(V3(0.9, 0.2, 0.7), pal.acc, V3(0, 1.55, 0.8))
+			for i = -1, 1 do S(V3(0.22, 0.7, 0.2), pal.body, V3(i * 0.3, 3.0, 0), ANG(0, 0, rad(-i * 18))) end
+		else
+			S(V3(1.15, 0.7, 0.9), pal.belly, V3(0, 1.7, 0.7))
+			S(V3(0.4, 0.28, 0.28), BLACK, V3(0, 1.95, 1.12))
+		end
+		for s = -1, 1, 2 do
+			S(V3(0.6, 0.6, 0.2), BLACK, V3(0.42 * s, 2.25, 0.66))
+			S(V3(0.34, 0.34, 0.12), WHITE, V3(0.42 * s, 2.25, 0.76), nil, NEON) -- the stare
+			S(V3(0.55, 1.7, 0.55), pal.body, V3(1.3 * s, 0.25, 0.15), ANG(0, 0, rad(-12 * s)))
+			S(V3(0.8, 1.6, 0.8), pal.body, V3(0.5 * s, -2.0, 0))
+			S(V3(0.9, 0.3, 1.1), pal.body, V3(0.5 * s, -2.9, 0.15))
+			if kind == "freddy" then
+				S(V3(0.7, 0.7, 0.3), pal.body, V3(0.85 * s, 2.85, 0))
+				S(V3(0.4, 0.4, 0.12), pal.belly, V3(0.85 * s, 2.85, 0.12))
+			elseif kind == "bonnie" then
+				S(V3(0.4, 2.0, 0.25), pal.body, V3(0.55 * s, 3.5, 0), ANG(0, 0, rad(-9 * s)))
+			end
+			if kind ~= "chica" then S(V3(0.5, 0.35, 0.25), pal.acc, V3(0.3 * s, 1.05, 0.72)) end
+		end
+		if kind == "freddy" then
+			local hat = cyl(model, V3(0.9, 1.0, 1.0) * K, BLACK, CF())
+			rig[#rig + 1] = { hat, CF(0, 3.45 * K, 0) * ANG(0, 0, rad(90)) }
+			local brim = cyl(model, V3(0.12, 1.5, 1.5) * K, BLACK, CF())
+			rig[#rig + 1] = { brim, CF(0, 2.9 * K, 0) * ANG(0, 0, rad(90)) }
+		end
+		return { model = model, update = function(root) for _, e in ipairs(rig) do e[1].CFrame = root * e[2] end end }
+	end
+
 	----------------------------------------------------------------
 	-- scenes
 	----------------------------------------------------------------
@@ -1223,75 +1464,673 @@ do
 		end, true)
 	end
 
+	----------------------------------------------------------------
+	-- HUNTER: Solo Leveling style dungeon gate, hunter slashing goblins, shadow soldiers rise
+	----------------------------------------------------------------
 	BUILD.hunter = function(tk)
-		light(C(70, 60, 130), C(170, 190, 255), V3(-0.3, -0.5, -0.8))
+		light(C(86, 76, 160), C(176, 190, 255), V3(-0.3, -0.5, -0.8))
 		local hw = extent()
-		local pc = V3(-hw + 2.1, -3.0, -2)
-		local ground = pc.Y - 2.2
-		-- gate portal: neon ring + dark disc + spiral
-		local discCF = CF(pc) * ANG(0, rad(90), 0)
-		cyl(world, V3(0.2, 4.4, 4.4), C(8, 4, 30), discCF, SMOOTH)
-		local ringBalls = {}
-		for i = 1, 40 do
-			ringBalls[i] = { p = ellipsoid(world, V3(0.34, 0.34, 0.34), i % 2 == 0 and C(110, 150, 255) or C(180, 96, 255), CF(pc), NEON), a = i / 40 * 2 * pi }
+		local ground = -5.4
+		local gx, gy, gz = -hw + 3.0, -0.5, -3.2
+		local rx, ry = 2.6, 4.6
+		local VIO, BLU, ICEW = C(180, 100, 255), C(110, 150, 255), C(215, 232, 255)
+		local flare = 0
+
+		local mist = mk("Frame", {
+			AnchorPoint = Vector2.new(0, 1), Position = UDim2.fromScale(0, 1), Size = UDim2.new(1, 0, 0, 120),
+			BackgroundColor3 = C(110, 70, 255), BorderSizePixel = 0,
+		}, layer)
+		mk("UIGradient", { Rotation = 90, Transparency = NumberSequence.new(1, 0.55) }, mist)
+		loopTween(mist, 2.2, { BackgroundColor3 = C(70, 150, 255) })
+		local flash = mk("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = C(160, 140, 255), BackgroundTransparency = 1, BorderSizePixel = 0 }, layer)
+
+		-- stars + ruined pillars
+		for _ = 1, 18 do
+			local s = rng:NextNumber(0.07, 0.16)
+			local st = ellipsoid(world, V3(s, s, s), pick({ ICEW, VIO }), CF(rng:NextNumber(-hw * 2, hw * 2), rng:NextNumber(-2, 11), -26), NEON)
+			local ph = rng:NextNumber(0, 6)
+			anim(function(_, t) st.Transparency = 0.2 + 0.6 * (sin(t * 2 + ph) + 1) / 2 end)
 		end
-		local spiral = {}
-		for k = 1, 26 do
-			spiral[k] = ellipsoid(world, V3(0.14, 0.14, 0.14), k % 2 == 0 and C(150, 120, 255) or C(120, 220, 255), CF(pc), NEON)
+		for i = 1, 6 do
+			local x = -hw * 1.7 + (i - 0.5) * (hw * 3.4 / 6)
+			local h = rng:NextNumber(5, 10)
+			box(world, V3(1.3, h, 1.3), C(16, 14, 38), CF(x, ground + h / 2, -15) * ANG(0, rad(rng:NextNumber(0, 45)), rad(rng:NextNumber(-4, 4))), SLATE)
+			if i % 2 == 0 then
+				local g = ellipsoid(world, V3(0.5, 0.8, 0.5), pick({ BLU, VIO }), CF(x, ground + h + 0.7, -15), NEON)
+				local ph = rng:NextNumber(0, 6)
+				anim(function(_, t) g.CFrame = CF(x, ground + h + 0.9 + sin(t * 1.5 + ph) * 0.25, -15) * ANG(0, t, 0) end)
+			end
 		end
-		local halo = ellipsoid(world, V3(5.6, 5.6, 0.2), C(130, 110, 255), CF(pc.X, pc.Y, pc.Z - 0.2), NEON, 0.88)
-		anim(function(_, t)
-			for _, r in ipairs(ringBalls) do
-				local a = r.a + t * 0.9
-				r.p.CFrame = CF(pc.X + cos(a) * 2.35, pc.Y + sin(a) * 2.35, pc.Z + 0.05)
-				r.p.Size = V3(1, 1, 1) * (0.3 + 0.12 * sin(t * 4 + r.a * 3))
+		box(world, V3(70, 0.5, 40), C(10, 8, 26), CF(0, ground - 0.25, -8), SLATE)
+
+		-- ===== the gate =====
+		local function ep(a, ox, oy, z) return V3(gx + cos(a) * (rx + ox), gy + sin(a) * (ry + oy), z) end
+		local function nang(a, ox, oy) return math.atan2(sin(a) / (ry + oy), cos(a) / (rx + ox)) end
+
+		local halo = ellipsoid(world, V3(rx * 2 + 2.8, ry * 2 + 2.8, 0.2), C(120, 120, 255), CF(gx, gy, gz - 0.5), NEON, 0.88)
+		ellipsoid(world, V3(rx * 2, ry * 2, 0.3), C(5, 3, 22), CF(gx, gy, gz), SMOOTH)
+		local core = ellipsoid(world, V3(rx * 1.4, ry * 1.4, 0.2), C(70, 70, 235), CF(gx, gy, gz + 0.12), NEON, 0.55)
+		local eye = ellipsoid(world, V3(rx * 0.55, ry * 0.5, 0.2), ICEW, CF(gx, gy, gz + 0.2), NEON, 0.65)
+
+		local ringA, ringB, spiral, runes, circ, debris, rays = {}, {}, {}, {}, {}, {}, {}
+		for i = 1, 40 do ringA[i] = { p = ellipsoid(world, V3(0.3, 0.3, 0.3), i % 2 == 0 and BLU or VIO, CF(), NEON), a = i / 40 * 2 * pi } end
+		for i = 1, 28 do ringB[i] = { p = ellipsoid(world, V3(0.2, 0.2, 0.2), i % 2 == 0 and ICEW or VIO, CF(), NEON), a = i / 28 * 2 * pi } end
+		for k = 1, 30 do spiral[k] = ellipsoid(world, V3(0.15, 0.15, 0.15), k % 2 == 0 and C(150, 120, 255) or C(120, 220, 255), CF(), NEON) end
+		for i = 1, 26 do circ[i] = { p = ellipsoid(world, V3(0.18, 0.18, 0.18), i % 2 == 0 and VIO or BLU, CF(), NEON), a = i / 26 * 2 * pi } end
+		for i = 1, 9 do rays[i] = box(world, V3(0.1, ry * 3.4, 0.05), C(130, 140, 255), CF(gx, gy, gz - 0.9), NEON, 0.86) end
+		local pad = ellipsoid(world, V3(rx * 3.6, 0.06, 4.8), C(110, 90, 255), CF(gx + 0.8, ground + 0.04, gz + 1.4), NEON, 0.65)
+
+		-- obsidian shards around the frame + pulsing runes
+		for i = 1, 16 do
+			local a = (i - 0.5) / 16 * 2 * pi
+			if sin(a) > -0.88 then
+				local h = rng:NextNumber(1.4, 2.8)
+				local n = nang(a, 1.1, 1.1)
+				local base = ep(a, 1.1, 1.1, gz + rng:NextNumber(-0.4, 0.2))
+				local dir = V3(cos(n), sin(n), 0)
+				box(world, V3(0.5, h, 0.45), C(16, 14, 40), CF(base + dir * (h / 2)) * ANG(0, 0, n - pi / 2 + rng:NextNumber(-0.12, 0.12)) * ANG(0, rad(30), 0), SLATE)
+				local tip = ellipsoid(world, V3(0.2, 0.34, 0.2), i % 2 == 0 and BLU or VIO, CF(base + dir * h), NEON)
+				local ph = rng:NextNumber(0, 6)
+				anim(function(_, t) tip.Transparency = 0.1 + 0.4 * (sin(t * 2.5 + ph) + 1) / 2 end)
+			end
+		end
+		for i = 1, 14 do
+			local a = (i - 0.5) / 14 * 2 * pi
+			if sin(a) > -0.8 then
+				local n = nang(a, 0.75, 0.75)
+				runes[#runes + 1] = { p = box(world, V3(0.5, 0.15, 0.06), ICEW, CF(ep(a, 0.75, 0.75, gz + 0.1)) * ANG(0, 0, n + pi / 2), NEON), i = i }
+			end
+		end
+		for i = 1, 7 do
+			debris[i] = {
+				p = box(world, V3(0.3, 0.3, 0.3) * rng:NextNumber(0.6, 1.6), C(20, 18, 44), CF(), SLATE),
+				a = rng:NextNumber(0, 2 * pi), r = rng:NextNumber(0.4, 1.0), ph = rng:NextNumber(0, 6), s = rng:NextNumber(0.2, 0.5),
+			}
+		end
+
+		anim(function(dt, t)
+			flare = math.max(0, flare - dt * 2)
+			halo.Transparency = math.clamp(0.86 - 0.07 * sin(t * 2.2) - 0.3 * flare, 0, 1)
+			core.Transparency = math.clamp(0.58 + 0.1 * sin(t * 3) - 0.35 * flare, 0, 1)
+			eye.Transparency = math.clamp(0.7 + 0.15 * sin(t * 4.1) - 0.3 * flare, 0, 1)
+			for _, r in ipairs(ringA) do
+				r.p.Position = ep(r.a + t * 0.7, 0, 0, gz + 0.22)
+				local s = 0.26 + 0.12 * sin(t * 4 + r.a * 3) + 0.18 * flare
+				r.p.Size = V3(s, s, s)
+			end
+			for _, r in ipairs(ringB) do
+				r.p.Position = ep(r.a - t * 1.1, 0.32, 0.32, gz + 0.18)
+				local s = 0.18 + 0.06 * sin(t * 5 + r.a * 2)
+				r.p.Size = V3(s, s, s)
 			end
 			for k, s in ipairs(spiral) do
-				local rr = 0.15 + k * 0.075
-				local a = k * 0.55 + t * 3
-				s.CFrame = CF(pc.X + cos(a) * rr, pc.Y + sin(a) * rr, pc.Z + 0.2)
+				local m, j = (k - 1) % 3, (k - 1) // 3 + 1
+				local fr = j / 10
+				local a = fr * 3.4 + t * 2.4 + m * 2.0944
+				s.Position = V3(gx + cos(a) * fr * (rx - 0.25), gy + sin(a) * fr * (ry - 0.25), gz + 0.28)
+				local z = 0.08 + 0.12 * fr
+				s.Size = V3(z, z, z)
 			end
-			halo.Transparency = 0.82 + 0.1 * sin(t * 3)
+			for _, r in ipairs(runes) do r.p.Transparency = 0.15 + 0.7 * (0.5 + 0.5 * sin(t * 3 - r.i * 0.8)) end
+			for i, r in ipairs(rays) do
+				r.CFrame = CF(gx, gy, gz - 0.9) * ANG(0, 0, t * 0.12 + i * pi / 9)
+				r.Transparency = math.clamp(0.84 + 0.1 * sin(t * 1.5 + i) - 0.1 * flare, 0, 1)
+			end
+			for _, c in ipairs(circ) do
+				local a = c.a - t * 0.5
+				c.p.Position = V3(gx + 0.8 + cos(a) * 4.6, ground + 0.07, gz + 1.4 + sin(a) * 2.3)
+			end
+			pad.Transparency = math.clamp(0.68 + 0.1 * sin(t * 2) - 0.2 * flare, 0, 1)
+			for _, d in ipairs(debris) do
+				local a = d.a + t * d.s * 0.4
+				d.p.CFrame = CF(gx + cos(a) * (rx + 1.2 + d.r * 2), gy + sin(a) * (ry + 1.0 + d.r * 1.5) + sin(t + d.ph) * 0.2, gz - 0.3 + sin(a)) * ANG(t * 0.7, t * 0.5, d.ph)
+			end
 		end)
-		-- mana orbs
-		for _ = 1, 5 do
-			local p = V3(rng:NextNumber(-hw, hw), rng:NextNumber(-1, 6), rng:NextNumber(-9, -2))
-			local o = ellipsoid(world, V3(0.3, 0.3, 0.3), pick({ C(120, 150, 255), C(190, 110, 255) }), CF(p), NEON)
-			local ph = rng:NextNumber(0, 6)
-			anim(function(_, t) o.CFrame = CF(p + V3(0, sin(t * 1.4 + ph) * 0.5, 0)) end)
-		end
-		every(tk, 0.15, function() -- sparks from the gate
-			local a = rng:NextNumber(0, 2 * pi)
-			emit({ pos = V3(pc.X + cos(a) * 2.3, pc.Y + sin(a) * 2.3, pc.Z), vel = V3(cos(a) * 0.8, sin(a) * 0.8 + 1, rng:NextNumber(0, 1)),
-				size = 0.1, col = pick({ C(150, 120, 255), C(120, 220, 255) }), life = 1.6 })
-		end)
-		local flash = mk("Frame", {
-			Size = UDim2.fromScale(1, 1), BackgroundColor3 = C(170, 140, 255), BackgroundTransparency = 1, BorderSizePixel = 0,
-		}, layer)
-		every(tk, function() return rng:NextNumber(8, 14) end, function()
-			flash.BackgroundTransparency = 0.8
-			tween(flash, 0.5, { BackgroundTransparency = 1 })
-		end, true)
 
-		local alive = 0
-		every(tk, 2.6, function()
-			if alive >= 3 then return end
-			alive += 1
+		-- lightning crackling off the rim
+		every(tk, function() return rng:NextNumber(0.5, 1.3) end, function()
+			local p0 = ep(rng:NextNumber(0, 2 * pi), 0.2, 0.2, gz + 0.3)
+			bolt(p0, p0 + V3(rng:NextNumber(-2.6, 2.6), rng:NextNumber(-2.6, 2.6), 0), pick({ C(150, 190, 255), C(200, 160, 255) }), 0.22, 5, 0.4, 0.07)
+		end)
+
+		-- ===== the fight =====
+		local hx = hw * 0.55
+		local hunter = hunter3d()
+		local hs = { x = hx, run = 0, slashT0 = -10, side = 1 }
+		local goblins, shadows = {}, {}
+		local SLASH_DUR = 0.4
+
+		local function spawnGoblin()
+			if #goblins >= 4 then return end
 			local g = goblin3d()
-			local t0, dur, ph = os.clock(), rng:NextNumber(8, 10), rng:NextNumber(0, 6)
-			local x0, x1 = pc.X + 0.3, hw + 3
+			goblins[#goblins + 1] = {
+				g = g, parts = g.model:GetChildren(), x = gx + 0.4, speed = rng:NextNumber(3.6, 5),
+				ph = rng:NextNumber(0, 6), born = os.clock(), pos = V3(gx + 0.4, ground + 1, gz + 0.6),
+			}
+			flare = 1
+			flash.BackgroundTransparency = 0.9
+			tween(flash, 0.4, { BackgroundTransparency = 1 })
+			for _ = 1, 10 do
+				local a = rng:NextNumber(0, 2 * pi)
+				emit({ pos = V3(gx + cos(a) * rx * 0.8, gy + sin(a) * ry * 0.8, gz + 0.3), vel = V3(cos(a) * 2.5 + 3, sin(a) * 2, rng:NextNumber(0, 1.5)), size = 0.14, col = pick({ BLU, VIO }), life = 0.9, grow = 1.5 })
+			end
+		end
+
+		local function arise(pos)
+			if #shadows >= 2 then return end
+			local g = goblin3d()
+			for _, p in ipairs(g.model:GetChildren()) do
+				if p.Material == NEON then
+					p.Color = C(190, 120, 255)
+				else
+					p.Color = C(24, 10, 60)
+					p.Transparency = 0.15
+				end
+			end
+			shadows[#shadows + 1] = { g = g, x = pos.X, ph = rng:NextNumber(0, 6), born = os.clock(), life = rng:NextNumber(6, 9) }
+		end
+
+		anim(function(dt, t)
+			-- pick the goblin closest to the hunter
+			local target, bestD
+			for _, o in ipairs(goblins) do
+				if not o.hitAt and o.x > gx + 1.2 then
+					local d = math.abs(hs.x - o.x)
+					if not bestD or d < bestD then target, bestD = o, d end
+				end
+			end
+			local want = hx
+			if target then want = math.min(hx, math.max(gx + 4.2, target.x + 2.4)) end
+			local dx = want - hs.x
+			hs.x += math.clamp(dx, -10 * dt, 10 * dt)
+			hs.run += ((math.abs(dx) > 0.25 and 1 or 0) - hs.run) * math.min(1, dt * 12)
+			if target and t - hs.slashT0 > SLASH_DUR + 0.04 and (hs.x - target.x) < 3.2 then
+				hs.slashT0, hs.side = t, -hs.side
+				target.hitAt = t + SLASH_DUR * 0.45
+			end
+			local e = (t - hs.slashT0) / SLASH_DUR
+			local slash = (e >= 0 and e <= 1) and e or nil
+			local lunge = slash and sin(slash * pi) * 0.7 or 0
+			local root = CF(hs.x, ground + 2.3 + math.abs(sin(t * 13)) * 0.12 * hs.run, 0.2) * ANG(0, pi + 0.2, 0) * CF(lunge, 0, 0)
+			local tip = hunter.update(root, t, hs.run, slash, hs.side)
+			if tip then emit({ pos = tip, vel = V3(0, 0, 0), size = 0.22, col = VIO, life = 0.35, grow = 0.6 }) end
+
+			for i = #goblins, 1, -1 do
+				local o = goblins[i]
+				if o.hitAt and t >= o.hitAt then
+					local p = o.pos + V3(0, 1, 0)
+					emit({ pos = p, vel = V3(0, 0, 0), size = 0.9, col = C(255, 255, 255), life = 0.18, grow = 2.5, fadeAt = 0 })
+					for _ = 1, 12 do
+						emit({ pos = p, vel = V3(rng:NextNumber(-5, 5), rng:NextNumber(-1, 6), rng:NextNumber(-2, 2)), acc = V3(0, -9, 0), size = rng:NextNumber(0.1, 0.3), col = pick({ C(170, 120, 255), C(110, 160, 255), C(255, 255, 255) }), life = 0.8, grow = 0.5 })
+					end
+					for _ = 1, 6 do
+						emit({ pos = p + V3(rng:NextNumber(-0.5, 0.5), -0.8, 0), vel = V3(rng:NextNumber(-0.3, 0.3), rng:NextNumber(1.5, 3), 0), size = rng:NextNumber(0.25, 0.45), col = C(40, 20, 90), mat = SMOOTH, life = 1.6, fadeAt = 0.4 })
+					end
+					bolt(p + V3(1.6, 1.8, 0.3), p + V3(-1.6, -1.2, 0.3), C(225, 205, 255), 0.2, 3, 0.25, 0.12)
+					if rng:NextNumber() < 0.4 then arise(o.pos) end
+					o.g.model:Destroy()
+					table.remove(goblins, i)
+				else
+					o.x += o.speed * dt * (o.hitAt and 0.3 or 1)
+					local prog = math.clamp((o.x - gx) / (rx + 1.2), 0, 1)
+					local z = (gz + 0.6) + (-0.1 - (gz + 0.6)) * prog
+					o.pos = V3(o.x, ground + 1.0 + math.abs(sin(t * 7 + o.ph)) * 0.35, z)
+					o.g.update(CF(o.pos) * ANG(0, rad(-10), 0), t)
+					local age = t - o.born
+					if age < 0.4 then
+						for _, p in ipairs(o.parts) do p.Transparency = 1 - age / 0.4 end
+					elseif not o.solid then
+						o.solid = true
+						for _, p in ipairs(o.parts) do p.Transparency = 0 end
+					end
+				end
+			end
+
+			for i = #shadows, 1, -1 do
+				local s = shadows[i]
+				if t - s.born > s.life or not s.g.model.Parent then
+					for _ = 1, 8 do
+						emit({ pos = V3(s.x, ground + 1.2, 0), vel = V3(rng:NextNumber(-1, 1), rng:NextNumber(1, 3), 0), size = 0.2, col = VIO, life = 0.8 })
+					end
+					s.g.model:Destroy()
+					table.remove(shadows, i)
+				else
+					local tx = hs.x + 2.2 + i * 1.3
+					s.x += (tx - s.x) * math.min(1, dt * 3)
+					local moving = math.abs(tx - s.x) > 0.3
+					s.g.update(CF(s.x, ground + 1.0 + (moving and math.abs(sin(t * 8 + s.ph)) * 0.35 or 0), -0.3 + i * 0.35) * ANG(0, pi + 0.15, 0), moving and t or 0)
+				end
+			end
+		end)
+
+		every(tk, 0.12, function() -- shadow aura around the hunter
+			emit({ pos = V3(hs.x + rng:NextNumber(-0.6, 0.6), ground + 0.3, 0.2), vel = V3(0, rng:NextNumber(1.5, 3), 0), size = rng:NextNumber(0.08, 0.2), col = pick({ VIO, BLU }), life = 1.3, fadeAt = 0.4 })
+		end)
+		task.delay(0.6, function() if token == tk then spawnGoblin() end end)
+		every(tk, function() return rng:NextNumber(1.3, 2.4) end, spawnGoblin, true)
+	end
+
+	----------------------------------------------------------------
+	-- JUNGLE: Jurassic-style valley (T-rex, raptors, brachiosaurus, pterosaurs)
+	----------------------------------------------------------------
+	BUILD.jungle = function(tk)
+		light(C(92, 116, 80), C(255, 232, 168), V3(-0.4, -0.8, -0.4))
+		local hw = extent()
+		local ground = -6
+		local LEAF = { C(30, 116, 52), C(48, 146, 60), C(22, 90, 46), C(78, 168, 66) }
+		local HAZE = C(132, 172, 124)
+		local function shade(c, d)
+			if d >= 0 then return c:Lerp(C(2, 12, 6), d) end
+			return c:Lerp(HAZE, -d)
+		end
+
+		-- sunbeams (2D, behind everything)
+		for i, x in ipairs({ 0.25, 0.5, 0.72 }) do
+			local shaft = mk("Frame", {
+				AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.fromScale(x, -0.1), Size = UDim2.new(0, 36 + i * 14, 1.5, 0),
+				Rotation = 16, BackgroundColor3 = C(255, 236, 170), BackgroundTransparency = 0.86, BorderSizePixel = 0,
+			}, layer)
+			mk("UIGradient", { Rotation = 90, Transparency = NumberSequence.new({ kp(0, 0.2), kp(1, 1) }) }, shaft)
+			loopTween(shaft, 3 + i, { BackgroundTransparency = 0.95 })
+		end
+
+		-- sun, misty mountains, ground
+		ellipsoid(world, V3(13, 13, 0.4), C(255, 214, 120), CF(hw * 0.5, 5.5, -36), NEON, 0.88)
+		ellipsoid(world, V3(7, 7, 0.4), C(255, 238, 170), CF(hw * 0.5, 5.5, -35.5), NEON, 0.15)
+		for i = 1, 5 do
+			local w, h = rng:NextNumber(14, 22), rng:NextNumber(8, 14)
+			ellipsoid(world, V3(w, h, 6), C(70, 112, 92):Lerp(HAZE, 0.35), CF(-hw * 2.2 + (i - 0.5) * (hw * 4.4 / 5), -6 + h * 0.2, -30), SMOOTH)
+		end
+		box(world, V3(90, 0.6, 40), C(20, 62, 28), CF(0, ground - 0.3, -8), GRASS)
+
+		-- palms
+		local function palm(x, z, h, d, lean)
+			local n = 5
+			for i = 1, n do
+				local f = (i - 0.5) / n
+				ellipsoid(world, V3(0.5 - f * 0.18, h / n * 1.3, 0.5 - f * 0.18), shade(C(104, 70, 42), d), CF(x + lean * f * f * h, ground + f * h, z) * ANG(0, 0, -lean * f * 2), WOOD)
+			end
+			local top = V3(x + lean * h, ground + h, z)
+			for k = 1, 3 do
+				ellipsoid(world, V3(0.4, 0.4, 0.4), shade(C(86, 56, 30), d), CF(top + V3(cos(k * 2.1) * 0.35, -0.35, sin(k * 2.1) * 0.35)), SMOOTH)
+			end
+			local leaves = {}
+			for k = 1, 9 do
+				leaves[k] = { p = ellipsoid(world, V3(3.4, 0.07, 0.8), shade(pick(LEAF), d), CF(), SMOOTH), a = k / 9 * 2 * pi }
+			end
+			local ph = rng:NextNumber(0, 6)
+			anim(function(_, t)
+				for _, l in ipairs(leaves) do
+					local droop = 0.5 + sin(t * 1.1 + ph + l.a * 2) * 0.09
+					l.p.CFrame = CF(top) * ANG(0, l.a, 0) * ANG(0, 0, -droop) * CF(1.7, 0, 0)
+				end
+			end)
+		end
+		palm(-hw * 0.9, -12, 11, -0.1, -0.1)
+		palm(hw * 0.75, -11, 10, 0.05, 0.1)
+		palm(hw * 0.2, -7, 12, 0.3, -0.08)
+		palm(-hw * 0.35, -5, 11, 0.35, 0.1)
+		palm(-hw * 1.05, 0.5, 14, 0.78, 0.14)
+		palm(hw * 1.1, 0.5, 15, 0.8, -0.12)
+
+		-- ferns
+		local ferns = {}
+		for _ = 1, 7 do
+			local x, z = rng:NextNumber(-hw * 1.1, hw * 1.1), rng:NextNumber(-6, 3)
+			local d = z > 0 and 0.5 or (z > -3 and 0.2 or 0)
+			for k = 1, 5 do
+				ferns[#ferns + 1] = {
+					p = ellipsoid(world, V3(2.0, 0.05, 0.5), shade(pick(LEAF), d), CF(), SMOOTH),
+					x = x, z = z, a = k / 5 * 2 * pi + rng:NextNumber(0, 1), lift = rng:NextNumber(0.5, 0.9), ph = rng:NextNumber(0, 6),
+				}
+			end
+		end
+		-- hanging vines
+		local vines = {}
+		for i = 1, 5 do
+			local segs = {}
+			for k = 1, 6 do segs[k] = ellipsoid(world, V3(0.12, 1.0, 0.12), shade(C(40, 110, 50), 0.3), CF(), SMOOTH) end
+			vines[i] = { x = rng:NextNumber(-hw, hw), z = rng:NextNumber(-4, 0), segs = segs, ph = rng:NextNumber(0, 6) }
+		end
+		anim(function(_, t)
+			for _, f in ipairs(ferns) do
+				f.p.CFrame = CF(f.x, ground + 0.15, f.z) * ANG(0, f.a, 0) * ANG(0, 0, f.lift + sin(t * 1.3 + f.ph) * 0.07) * CF(1.0, 0, 0)
+			end
+			for _, v in ipairs(vines) do
+				for k, s in ipairs(v.segs) do
+					local w = sin(t * 0.8 + v.ph + k * 0.35)
+					s.CFrame = CF(v.x + w * 0.12 * k, 9.2 - k * 0.95, v.z) * ANG(0, 0, w * 0.06)
+				end
+			end
+		end)
+
+		-- drifting ground mist
+		for i = 1, 4 do
+			local m = ellipsoid(world, V3(rng:NextNumber(7, 10), 0.8, 3), C(220, 236, 220), CF(0, ground + 0.6 + i * 0.3, rng:NextNumber(-9, -2)), SMOOTH, 0.85)
+			local x0, sp = rng:NextNumber(-hw, hw), rng:NextNumber(0.1, 0.25) * (i % 2 == 0 and 1 or -1)
+			anim(function(_, t)
+				local p = m.Position
+				m.Position = V3(((x0 + t * sp + hw * 1.5) % (hw * 3)) - hw * 1.5, p.Y, p.Z)
+			end)
+		end
+
+		-- brachiosaurus browsing above the canopy
+		do
+			local bx, bz = -hw * 0.55, -17
+			local col = C(104, 138, 98):Lerp(HAZE, 0.25)
+			local function E(size, pos) return ellipsoid(world, size, col, CF(pos), SMOOTH) end
+			E(V3(6, 3.2, 2.6), V3(bx, ground + 4.3, bz))
+			for _, o in ipairs({ { -1.8, 0.9 }, { -1.8, -0.9 }, { 1.8, 0.9 }, { 1.8, -0.9 } }) do
+				E(V3(1.1, 3.4, 1.1), V3(bx + o[1], ground + 1.7, bz + o[2]))
+			end
+			for i = 1, 6 do
+				E(V3(1.8 - i * 0.22, 1.1 - i * 0.14, 1.1 - i * 0.14), V3(bx - 3.2 - i * 1.0, ground + 4.5 - i * 0.3, bz))
+			end
+			local neck = {}
+			for i = 1, 8 do neck[i] = ellipsoid(world, V3(1.6, 1.3 - i * 0.1, 1.3 - i * 0.1), col, CF(), SMOOTH) end
+			local head = ellipsoid(world, V3(1.5, 0.7, 0.7), col, CF(), SMOOTH)
+			anim(function(_, t)
+				local px, py = bx + 2.6, ground + 5.2
+				for i, s in ipairs(neck) do
+					local a = rad(52 + i * 4.5 - math.max(0, i - 5) * 16) + sin(t * 0.5 - i * 0.4) * 0.05
+					s.CFrame = CF(px + cos(a) * 0.7, py + sin(a) * 0.7, bz) * ANG(0, 0, a)
+					px += cos(a) * 1.25
+					py += sin(a) * 1.25
+				end
+				head.CFrame = CF(px + 0.6, py + 0.1, bz) * ANG(0, 0, rad(-10) + sin(t * 1.8) * 0.15)
+			end)
+		end
+
+		-- dinosaurs
+		local TREX_PAL = { body = C(84, 108, 62), belly = C(196, 184, 124), stripe = C(40, 58, 36), eye = C(255, 210, 60) }
+		local TREX = { K = 0.85, fat = 1, head = 1, arm = 1, tailN = 8, tailStep = 0.7, l1 = 1.5, l2 = 1.5, swing = 0.4, speed = 4.5, roar = 0.6 }
+		local RAP_PAL = { body = C(190, 92, 40), belly = C(240, 214, 160), stripe = C(36, 36, 40), eye = C(255, 240, 80) }
+		local RAPTOR = { K = 0.55, fat = 0.5, head = 0.6, arm = 1.6, tailN = 9, tailStep = 0.62, l1 = 1.3, l2 = 1.6, swing = 0.7, speed = 14 }
+
+		local function crossDino(pal, p, dir, z, dur, dust, a0)
+			local d = theropod(pal, p)
+			local hw2 = extent() + 8
+			local t0 = os.clock() - (a0 or 0) * dur
 			anim(function(_, t)
 				local a = (t - t0) / dur
-				if a >= 1 then
-					g.model:Destroy()
-					alive -= 1
-					return false
+				if a >= 1 then d.model:Destroy() return false end
+				local x = dir * (-hw2 + 2 * hw2 * a)
+				local bob = math.abs(sin(t * p.speed)) * 0.15 * p.K
+				local yaw = dir == 1 and -0.15 or pi + 0.15
+				d.update(CF(x, ground + d.h + bob, z) * ANG(0, yaw, 0), t, math.max(0, sin(t * 0.9)) ^ 6 * (p.roar or 0))
+				if dust and rng:NextNumber() < 0.1 then
+					emit({ pos = V3(x, ground + 0.2, z + 0.5), vel = V3(rng:NextNumber(-1, 1), rng:NextNumber(0.5, 1.5), 0), size = rng:NextNumber(0.3, 0.6), col = C(150, 140, 100), mat = SMOOTH, life = 1, grow = 2 })
 				end
-				local x = x0 + (x1 - x0) * a
-				local z = -3.2 + 2.7 * math.clamp((x - (pc.X + 2.4)) / 3, 0, 1) -- starts behind the disc, steps out in front
-				local y = ground + 0.75 + math.abs(sin(t * 7 + ph)) * 0.35
-				g.update(CF(x, y, z) * ANG(0, rad(-12), sin(t * 7 + ph) * 0.06), t)
 			end)
+		end
+
+		local function flyPtero(dir, y0, z, dur)
+			local K = 0.9
+			local model = mk("Model", {}, world)
+			local body, bone, mem = C(120, 96, 80), C(60, 44, 34), C(176, 116, 72)
+			local rig = {}
+			local function S(size, col, pos, rot)
+				local e = ellipsoid(model, size * K, col, CF(), SMOOTH)
+				rig[#rig + 1] = { e, CF(pos * K) * (rot or CF()) }
+			end
+			S(V3(1.4, 0.5, 0.5), body, V3(0, 0, 0))
+			S(V3(0.8, 0.3, 0.3), body, V3(0.95, 0.15, 0))
+			S(V3(1.5, 0.1, 0.1), bone, V3(1.9, 0.1, 0))
+			S(V3(1.0, 0.22, 0.08), body, V3(-0.45, 0.45, 0), ANG(0, 0, rad(25)))
+			S(V3(1.1, 0.12, 0.12), body, V3(-1.0, -0.05, 0))
+			local wings = {}
+			for s = -1, 1, 2 do
+				wings[#wings + 1] = {
+					s = s,
+					a = ellipsoid(model, V3(1.3, 0.05, 2.0) * K, mem, CF(), SMOOTH),
+					b = ellipsoid(model, V3(0.9, 0.04, 1.8) * K, mem, CF(), SMOOTH),
+					bone = ellipsoid(model, V3(0.08, 0.08, 3.4) * K, bone, CF(), SMOOTH),
+				}
+			end
+			local hw2 = extent() + 5
+			local t0 = os.clock()
+			anim(function(_, t)
+				local a = (t - t0) / dur
+				if a >= 1 then model:Destroy() return false end
+				local x = dir * (-hw2 + 2 * hw2 * a)
+				local root = CF(x, y0 + sin(a * pi * 2) * 0.6, z) * ANG(0, dir == 1 and 0 or pi, 0) * ANG(cos(a * pi * 2) * 0.15, 0, 0)
+				for _, e in ipairs(rig) do e[1].CFrame = root * e[2] end
+				local f = sin(t * 7) * 0.7
+				for _, w in ipairs(wings) do
+					local s = w.s
+					local base = root * CF(0, 0.1 * K, 0.3 * K * s) * ANG(f * s, 0, 0)
+					w.a.CFrame = base * CF(-0.1 * K, 0, 1.0 * K * s)
+					w.bone.CFrame = base * CF(0.5 * K, 0.02, 1.7 * K * s)
+					w.b.CFrame = base * CF(0.3 * K, 0, 2.0 * K * s) * ANG(f * 0.6 * s, 0, 0) * CF(-0.1 * K, 0, 0.8 * K * s)
+				end
+			end)
+		end
+
+		crossDino(TREX_PAL, TREX, -1, -7.5, 18, true, 0.4)
+		task.delay(1, function() if token == tk then flyPtero(1, 4, -5, 7) end end)
+		every(tk, function() return rng:NextNumber(24, 34) end, function()
+			crossDino(TREX_PAL, TREX, rng:NextInteger(0, 1) * 2 - 1, -7.5, 18, true, 0)
+		end, true)
+		every(tk, function() return rng:NextNumber(13, 19) end, function()
+			local dir = rng:NextInteger(0, 1) * 2 - 1
+			crossDino(RAP_PAL, RAPTOR, dir, -3.2, 3.8, false, 0)
+			crossDino(RAP_PAL, RAPTOR, dir, -4.4, 3.8, false, -0.08)
+		end, true)
+		every(tk, function() return rng:NextNumber(6, 10) end, function()
+			flyPtero(rng:NextInteger(0, 1) * 2 - 1, rng:NextNumber(3, 6.5), rng:NextNumber(-7, -3), 7)
+		end, true)
+
+		every(tk, 0.35, function() -- falling leaves
+			emit({ pos = V3(rng:NextNumber(-hw, hw), 9, rng:NextNumber(-6, 2)), vel = V3(rng:NextNumber(-0.8, 0.4), -rng:NextNumber(0.8, 1.5), 0),
+				size = V3(0.3, 0.03, 0.18), col = pick(LEAF), mat = SMOOTH, life = 9,
+				spin = V3(rng:NextNumber(-3, 3), rng:NextNumber(-3, 3), rng:NextNumber(-3, 3)), fadeAt = 0.9 })
+		end)
+		every(tk, 0.25, function() -- fireflies
+			emit({ pos = V3(rng:NextNumber(-hw, hw), rng:NextNumber(-5, 3), rng:NextNumber(-8, 1)), vel = V3(rng:NextNumber(-0.4, 0.4), rng:NextNumber(-0.2, 0.5), 0),
+				size = 0.09, col = C(220, 255, 120), life = 4, fadeAt = 0.5 })
+		end)
+	end
+
+	----------------------------------------------------------------
+	-- FNAF: security-cam hallway, flickering lights, animatronics creeping closer in the dark
+	----------------------------------------------------------------
+	BUILD.fnaf = function(tk)
+		local hw = extent()
+		local Wc, floorY = hw * 0.95, -6
+		local level, shown = 1, -1
+		local lamps, pads = {}, {}
+		local function setLight(l)
+			light(C(14, 8, 8):Lerp(C(116, 92, 82), l), C(30, 14, 10):Lerp(C(255, 214, 172), l), V3(0.1, -0.7, -1))
+		end
+
+		-- hallway shell
+		for s = -1, 1, 2 do
+			box(world, V3(0.5, 14, 44), C(58, 30, 28), CF(s * (Wc + 0.25), 0, -8), FABRIC)
+			box(world, V3(0.55, 4.2, 44), C(34, 16, 16), CF(s * (Wc + 0.2), -4, -8), WOOD)
+		end
+		box(world, V3(2 * Wc + 1.2, 0.5, 44), C(30, 26, 28), CF(0, 6.75, -8), SMOOTH)
+		for r = 1, 9 do
+			for c = 1, 4 do
+				box(world, V3(2 * Wc / 4, 0.3, 4), (r + c) % 2 == 0 and C(26, 22, 24) or C(74, 68, 62), CF(-Wc + (c - 0.5) * (2 * Wc / 4), floorY - 0.15, 8 - (r - 0.5) * 4), SMOOTH)
+			end
+		end
+
+		-- show stage at the end of the hall
+		box(world, V3(2 * Wc, 13, 0.5), C(44, 18, 56), CF(0, 0, -28.5), SMOOTH)
+		for s = -1, 1, 2 do
+			ellipsoid(world, V3(3.2, 12, 1.6), C(128, 24, 56), CF(s * (Wc - 1.5), 0.2, -27.4), FABRIC)
+			ellipsoid(world, V3(2.2, 11, 1.2), C(98, 16, 42), CF(s * (Wc - 2.6), 0.2, -27.2), FABRIC)
+		end
+		ellipsoid(world, V3(2 * Wc, 2.0, 1.6), C(128, 24, 56), CF(0, 5.6, -27.4), FABRIC)
+		for i = 1, 6 do
+			local st = box(world, V3(0.5, 0.5, 0.06), C(255, 214, 80), CF(rng:NextNumber(-3.5, 3.5), rng:NextNumber(1.5, 4.5), -28.1) * ANG(0, 0, rad(45)), NEON)
+			local ph = rng:NextNumber(0, 6)
+			anim(function(_, t) st.Transparency = 0.1 + 0.6 * (sin(t * 2.4 + ph) + 1) / 2 end)
+		end
+		local cones = {}
+		for s = -1, 1, 2 do
+			cones[#cones + 1] = box(world, V3(2.4, 13, 2.4), C(255, 240, 200), CF(s * 2.5, 0.5, -24) * ANG(0, 0, rad(14 * s)), NEON, 0.94)
+		end
+
+		-- ceiling lamps + light pools
+		for _, z in ipairs({ -3, -9, -15, -21 }) do
+			lamps[#lamps + 1] = box(world, V3(1.8, 0.12, 1.0), C(255, 238, 196), CF(0, 6.2, z), NEON)
+			pads[#pads + 1] = ellipsoid(world, V3(5.5, 0.05, 3.6), C(255, 226, 170), CF(0, floorY + 0.03, z), NEON, 0.82)
+		end
+
+		-- party pennants + kid posters
+		local PEN = { C(210, 50, 60), C(240, 200, 60), C(60, 130, 210), C(70, 180, 90) }
+		for _, z in ipairs({ -5, -12 }) do
+			for i = 0, 10 do
+				local u = (i - 5) / 5
+				box(world, V3(0.62, 0.62, 0.05), PEN[i % 4 + 1], CF(-Wc + 2 * Wc * i / 10, 5.2 - 1.1 * (1 - u * u), z) * ANG(0, 0, rad(45)), FABRIC)
+			end
+		end
+		local POST = { C(214, 96, 116), C(96, 164, 214), C(232, 192, 78) }
+		for i, z in ipairs({ -6, -10, -18 }) do
+			for s = -1, 1, 2 do
+				local x = s * (Wc - 0.1)
+				box(world, V3(0.1, 2.4, 1.9), POST[i], CF(x, 1.2, z), SMOOTH)
+				for e = -1, 1, 2 do
+					ellipsoid(world, V3(0.06, 0.3, 0.3), C(20, 14, 14), CF(x - s * 0.06, 1.5, z + e * 0.4), SMOOTH)
+				end
+			end
+		end
+
+		-- Pirate Cove curtain with eyes peeking out
+		local cx = -Wc + 0.5
+		box(world, V3(0.35, 8, 1.9), C(96, 30, 118), CF(cx, 0.5, -12.6), FABRIC)
+		box(world, V3(0.35, 8, 1.9), C(96, 30, 118), CF(cx, 0.5, -15.4), FABRIC)
+		box(world, V3(0.3, 8, 0.9), C(4, 2, 4), CF(cx - 0.05, 0.5, -14), SMOOTH)
+		local foxEyes = {}
+		for e = -1, 1, 2 do
+			foxEyes[#foxEyes + 1] = ellipsoid(world, V3(0.1, 0.24, 0.24), C(255, 210, 40), CF(cx + 0.2, 0.9, -14 + e * 0.25), NEON, 1)
+		end
+		local function peek()
+			task.spawn(function()
+				for _ = 1, 4 do
+					if token ~= tk then return end
+					for _, e in ipairs(foxEyes) do e.Transparency = 0.1 end
+					task.wait(rng:NextNumber(0.15, 0.5))
+					for _, e in ipairs(foxEyes) do e.Transparency = 1 end
+					task.wait(rng:NextNumber(0.08, 0.2))
+				end
+			end)
+		end
+
+		-- desk fan in the foreground
+		local fc = V3(hw * 0.6, -2.4, 6)
+		local blades = {}
+		for k = 1, 3 do blades[k] = ellipsoid(world, V3(0.5, 1.6, 0.1), C(70, 72, 80), CF(), SMOOTH) end
+		ellipsoid(world, V3(0.55, 0.55, 0.5), C(40, 40, 46), CF(fc), SMOOTH)
+		box(world, V3(0.22, 2.6, 0.22), C(40, 40, 46), CF(fc + V3(0, -1.9, -0.1)), SMOOTH)
+		ellipsoid(world, V3(1.8, 0.3, 1.2), C(40, 40, 46), CF(fc + V3(0, -3.2, -0.1)), SMOOTH)
+
+		-- animatronics
+		local STAGEZ = { -24, -19.5, -15, -10.5, -6.5 }
+		local actors = {}
+		for i, def in ipairs({ { "freddy", 0 }, { "bonnie", -3.4 }, { "chica", 3.4 } }) do
+			actors[i] = { a = animatronic(def[1]), lane = def[2], stage = 1, ph = i * 1.7 }
+		end
+
+		-- 2D camera overlay
+		local vg = mk("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = C(0, 0, 0), BorderSizePixel = 0 }, overlay)
+		mk("UIGradient", { Rotation = 90, Transparency = NumberSequence.new({ kp(0, 0.25), kp(0.35, 1), kp(0.65, 1), kp(1, 0.25) }) }, vg)
+		local vg2 = mk("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = C(0, 0, 0), BorderSizePixel = 0 }, overlay)
+		mk("UIGradient", { Rotation = 0, Transparency = NumberSequence.new({ kp(0, 0.35), kp(0.2, 1), kp(0.8, 1), kp(1, 0.35) }) }, vg2)
+		local band = mk("Frame", { Position = UDim2.fromScale(0, -0.2), Size = UDim2.new(1, 0, 0, 70), BackgroundColor3 = C(255, 255, 255), BorderSizePixel = 0 }, overlay)
+		mk("UIGradient", { Rotation = 90, Transparency = NumberSequence.new({ kp(0, 1), kp(0.5, 0.93), kp(1, 1) }) }, band)
+		TweenService:Create(band, TweenInfo.new(5, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1), { Position = UDim2.fromScale(0, 1.1) }):Play()
+		local rec = mk("TextLabel", {
+			AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 10, 1, -8), Size = UDim2.fromOffset(60, 16), BackgroundTransparency = 1,
+			Text = "● REC", Font = FONT_TITLE, TextSize = 12, TextColor3 = C(255, 60, 50), TextXAlignment = Enum.TextXAlignment.Left,
+		}, overlay)
+		loopTween(rec, 0.6, { TextTransparency = 1 })
+		local HOURS = { "12 AM", "1 AM", "2 AM", "3 AM", "4 AM", "5 AM", "6 AM" }
+		local hour = 1
+		local clock = mk("TextLabel", {
+			AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -10, 1, -8), Size = UDim2.fromOffset(60, 16), BackgroundTransparency = 1,
+			Text = HOURS[1], Font = FONT_TITLE, TextSize = 12, TextColor3 = C(244, 226, 206), TextXAlignment = Enum.TextXAlignment.Right,
+		}, overlay)
+
+		local function staticBurst()
+			task.spawn(function()
+				for _ = 1, 4 do
+					if token ~= tk then return end
+					local f = mk("Frame", {
+						Size = UDim2.fromScale(1, 1), BackgroundColor3 = pick({ C(255, 255, 255), C(160, 160, 170), C(255, 60, 50) }),
+						BackgroundTransparency = rng:NextNumber(0.55, 0.8), BorderSizePixel = 0, ZIndex = 5,
+					}, overlay)
+					task.wait(0.05)
+					f:Destroy()
+					task.wait(0.03)
+				end
+			end)
+		end
+
+		local function advance()
+			local a = actors[rng:NextInteger(1, #actors)]
+			a.stage += 1
+			if a.stage > #STAGEZ then
+				a.stage = 1
+				staticBurst()
+			end
+		end
+
+		local function blackout(after)
+			task.spawn(function()
+				for _, v in ipairs({ 0.2, 1, 0, 0.6, 0, 0, 0.3, 0 }) do
+					if token ~= tk then return end
+					level = v
+					task.wait(rng:NextNumber(0.05, 0.12))
+				end
+				if token ~= tk then return end
+				if after then after() end
+				task.wait(rng:NextNumber(0.3, 0.7))
+				for _, v in ipairs({ 0.5, 0, 0.8, 0.3, 1 }) do
+					if token ~= tk then return end
+					level = v
+					task.wait(rng:NextNumber(0.06, 0.14))
+				end
+				level = 1
+			end)
+		end
+
+		anim(function(_, t)
+			if level ~= shown then
+				shown = level
+				setLight(level)
+				for _, l in ipairs(lamps) do l.Transparency = (1 - level) * 0.95 end
+				for _, p in ipairs(pads) do p.Transparency = 0.8 + (1 - level) * 0.2 end
+				for _, c in ipairs(cones) do c.Transparency = 0.93 + (1 - level) * 0.07 end
+			end
+			for k, b in ipairs(blades) do
+				b.CFrame = CF(fc + V3(0, 0, 0.2)) * ANG(0, 0, t * 14 + k * 2.0944) * CF(0, 0.8, 0)
+			end
+			for _, a in ipairs(actors) do
+				local x = a.lane * (1 - 0.12 * (a.stage - 1)) + sin(t * 0.8 + a.ph) * 0.05
+				a.a.update(CF(x, floorY + 3.5, STAGEZ[a.stage]) * ANG(sin(t * 0.6 + a.ph) * 0.03, sin(t * 0.5 + a.ph) * 0.05, 0))
+			end
+		end)
+
+		every(tk, function() return rng:NextNumber(6, 11) end, function() blackout(advance) end, true)
+		every(tk, function() return rng:NextNumber(5, 11) end, peek, true)
+		every(tk, 40, function()
+			hour = hour % #HOURS + 1
+			clock.Text = HOURS[hour]
+		end, true)
+		every(tk, function() return rng:NextNumber(3, 7) end, function() -- glitch bars
+			for _ = 1, rng:NextInteger(1, 3) do
+				local g = mk("Frame", {
+					Position = UDim2.fromScale(0, rng:NextNumber(0, 1)), Size = UDim2.new(1, 0, 0, rng:NextInteger(3, 8)),
+					BackgroundColor3 = C(255, 255, 255), BackgroundTransparency = 0.8, BorderSizePixel = 0, ZIndex = 4,
+				}, overlay)
+				task.delay(0.08, function() g:Destroy() end)
+			end
+		end, true)
+		every(tk, 0.35, function() -- dust in the lamp light
+			emit({ pos = V3(rng:NextNumber(-Wc * 0.7, Wc * 0.7), rng:NextNumber(-3, 5), rng:NextNumber(-20, 4)),
+				vel = V3(rng:NextNumber(-0.2, 0.2), rng:NextNumber(-0.1, 0.2), 0), size = 0.05, col = C(230, 210, 190), life = 5, fadeAt = 0.5 })
 		end)
 	end
 
@@ -1307,6 +2146,7 @@ do
 		table.clear(anims)
 		table.clear(P3)
 		layer:ClearAllChildren()
+		overlay:ClearAllChildren()
 		world:ClearAllChildren()
 		local build = def.scene and BUILD[def.scene]
 		scene.Visible = build ~= nil
@@ -2126,7 +2966,9 @@ local THEME_BLURBS = {
 	ice = "Ice - an ice dragon glides past glowing crystals and snow",
 	space = "Space - a lit ringed planet, moon, asteroids and a rocket",
 	murim = "Murim - misty karst peaks, a pagoda, a floating sword and qi",
-	hunter = "Hunter - 3D goblins pour out of a glowing gate portal",
+	hunter = "Hunter - a hunter slashes goblins pouring from a glowing dungeon gate, shadows rise",
+	jungle = "Jungle - T-rex, raptors, a brachiosaurus and pterosaurs in a misty valley",
+	fnaf = "FNAF - a flickering hallway, animatronics creeping closer between blackouts",
 }
 Scenes.setBlurb = function(name)
 	local s = THEME_BLURBS[name] or ""
