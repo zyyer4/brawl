@@ -209,6 +209,89 @@ local THEMES = {
 		onPink = INK,
 	},
 }
+
+------------------------------------------------------------------------
+-- NEW THEMES (palettes)
+------------------------------------------------------------------------
+local Scenes = {
+	order = { "light", "dark", "lava", "ice", "space", "murim", "hunter" },
+	neonA = PINK,
+	neonB = TEAL,
+}
+
+do
+	local C = Color3.fromRGB
+	local function variant(over)
+		local t = {}
+		for k, v in pairs(THEMES.dark) do t[k] = v end
+		for k, v in pairs(over) do t[k] = v end
+		return t
+	end
+
+	THEMES.light.icon, THEMES.light.label = "🌸", "Sakura"
+	THEMES.dark.icon, THEMES.dark.label = "🌙", "Midnight"
+
+	THEMES.lava = variant({
+		label = "Lava", icon = "🌋", scene = "lava", card = 0.3, dim = 1,
+		bgTop = C(34, 8, 10), bgBot = C(150, 44, 10),
+		neonA = C(255, 106, 40), neonB = C(255, 200, 64),
+		ink_b = C(22, 6, 4), ink_t = C(255, 228, 204), ink_s = C(22, 6, 4),
+		cream_b = C(64, 20, 14), cream_t = C(255, 240, 220), cream_s = C(30, 8, 4),
+		pink = C(255, 110, 40), teal = C(255, 196, 64), muted = C(220, 156, 124), off = C(104, 52, 38),
+		bg = C(44, 14, 10), white = C(40, 16, 12), green = C(150, 226, 96), red = C(255, 78, 64),
+		rose = C(255, 116, 84), aqua = C(255, 206, 96), violet = C(255, 150, 100),
+		pinkHover = C(255, 144, 76), creamHover = C(100, 38, 24), knob = C(255, 236, 214), onPink = C(34, 8, 4),
+	})
+
+	THEMES.ice = variant({
+		label = "Ice", icon = "❄️", scene = "ice", card = 0.3, dim = 1,
+		bgTop = C(8, 22, 46), bgBot = C(58, 128, 178),
+		neonA = C(110, 200, 255), neonB = C(200, 245, 255),
+		ink_b = C(6, 16, 32), ink_t = C(226, 245, 255), ink_s = C(6, 16, 32),
+		cream_b = C(24, 54, 90), cream_t = C(240, 250, 255), cream_s = C(8, 20, 40),
+		pink = C(110, 200, 255), teal = C(170, 232, 255), muted = C(146, 184, 214), off = C(52, 84, 120),
+		bg = C(14, 32, 56), white = C(18, 40, 70), green = C(110, 240, 200), red = C(255, 110, 150),
+		rose = C(255, 140, 190), aqua = C(150, 240, 255), violet = C(160, 170, 255),
+		pinkHover = C(150, 220, 255), creamHover = C(40, 78, 120), knob = C(240, 250, 255), onPink = C(6, 20, 40),
+	})
+
+	THEMES.space = variant({
+		label = "Space", icon = "🚀", scene = "space", card = 0.3, dim = 1,
+		bgTop = C(3, 2, 14), bgBot = C(30, 12, 58),
+		neonA = C(186, 120, 255), neonB = C(90, 200, 255),
+		ink_b = C(3, 2, 12), ink_t = C(228, 224, 255), ink_s = C(3, 2, 12),
+		cream_b = C(24, 18, 56), cream_t = C(240, 236, 255), cream_s = C(8, 4, 24),
+		pink = C(186, 120, 255), teal = C(90, 200, 255), muted = C(150, 140, 200), off = C(54, 48, 96),
+		bg = C(8, 6, 24), white = C(14, 10, 36), green = C(90, 240, 170), red = C(255, 90, 140),
+		rose = C(255, 120, 200), aqua = C(90, 220, 255), violet = C(200, 150, 255),
+		pinkHover = C(206, 150, 255), creamHover = C(40, 32, 84), knob = C(236, 230, 255), onPink = C(8, 4, 24),
+	})
+
+	THEMES.murim = variant({
+		label = "Murim", icon = "⚔️", scene = "murim", card = 0.28, dim = 1,
+		bgTop = C(16, 18, 22), bgBot = C(48, 40, 34),
+		neonA = C(200, 64, 52), neonB = C(214, 176, 86),
+		ink_b = C(8, 8, 8), ink_t = C(238, 230, 206), ink_s = C(8, 8, 8),
+		cream_b = C(40, 40, 34), cream_t = C(246, 238, 212), cream_s = C(14, 14, 12),
+		pink = C(200, 64, 52), teal = C(214, 176, 86), muted = C(172, 162, 132), off = C(70, 68, 58),
+		bg = C(22, 24, 22), white = C(28, 28, 24), green = C(112, 192, 132), red = C(232, 72, 62),
+		rose = C(216, 92, 78), aqua = C(122, 202, 172), violet = C(172, 142, 202),
+		pinkHover = C(226, 92, 74), creamHover = C(62, 60, 50), knob = C(242, 232, 206), onPink = C(252, 242, 216),
+	})
+
+	THEMES.hunter = variant({
+		label = "Hunter", icon = "🚪", scene = "hunter", card = 0.3, dim = 1,
+		bgTop = C(5, 3, 18), bgBot = C(28, 12, 60),
+		neonA = C(110, 150, 255), neonB = C(180, 96, 255),
+		ink_b = C(4, 4, 14), ink_t = C(216, 230, 255), ink_s = C(4, 4, 14),
+		cream_b = C(20, 24, 58), cream_t = C(232, 242, 255), cream_s = C(6, 6, 22),
+		pink = C(110, 150, 255), teal = C(180, 96, 255), muted = C(132, 142, 204), off = C(44, 48, 96),
+		bg = C(10, 8, 26), white = C(12, 14, 40), green = C(80, 230, 200), red = C(255, 80, 110),
+		rose = C(200, 110, 255), aqua = C(90, 200, 255), violet = C(172, 122, 255),
+		pinkHover = C(140, 172, 255), creamHover = C(34, 40, 92), knob = C(228, 238, 255), onPink = C(8, 10, 34),
+	})
+end
+
 local currentTheme = "light"
 local function tc(key)
 	return THEMES[currentTheme][key] or THEMES.light[key]
@@ -349,6 +432,415 @@ local dim = create("Frame", {
 	ZIndex = 2,
 }, window)
 
+------------------------------------------------------------------------
+-- NEW: animated theme scenes (dragons, space, murim, hunter gate)
+------------------------------------------------------------------------
+do
+	local C = Color3.fromRGB
+	local kp = NumberSequenceKeypoint.new
+	local ck = ColorSequenceKeypoint.new
+	local rng = Random.new()
+	local BASE_VEIL = veilGradient.Transparency
+	local SCENE_VEIL = NumberSequence.new({ kp(0, 0.9), kp(1, 0.96) })
+
+	-- plain Instance builder (skips the auto-theming that create() does)
+	local function mk(class, props, parent)
+		local o = Instance.new(class)
+		for k, v in pairs(props) do o[k] = v end
+		o.Parent = parent
+		return o
+	end
+
+	pixelLayer.ZIndex = 0
+	realImage.ZIndex = 0
+	local scene = mk("Frame", {
+		Name = "Scene", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1,
+		BorderSizePixel = 0, ZIndex = 1, Visible = false, ClipsDescendants = true,
+	}, window)
+	local bg = mk("Frame", {
+		Size = UDim2.fromScale(1, 1), BackgroundColor3 = C(255, 255, 255), BorderSizePixel = 0,
+	}, scene)
+	local grad = mk("UIGradient", { Rotation = 90 }, bg)
+	local layer = mk("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1 }, scene)
+	local token = 0
+
+	local function pick(list) return list[rng:NextInteger(1, #list)] end
+
+	-- pixel sprite: rows of chars, pal maps char -> Color3 ('.' = empty)
+	local function sprite(parent, rows, pal, px, mirror)
+		local W = 0
+		for _, r in ipairs(rows) do W = math.max(W, #r) end
+		local holder = mk("Frame", {
+			Size = UDim2.fromOffset(W * px, #rows * px), BackgroundTransparency = 1,
+		}, parent)
+		for y, row in ipairs(rows) do
+			row = row .. string.rep(".", W - #row)
+			if mirror then row = row:reverse() end
+			local x = 1
+			while x <= #row do
+				local ch, x0 = row:sub(x, x), x
+				while x <= #row and row:sub(x, x) == ch do x += 1 end
+				local col = pal[ch]
+				if col then
+					mk("Frame", {
+						Position = UDim2.fromOffset((x0 - 1) * px, (y - 1) * px),
+						Size = UDim2.fromOffset((x - x0) * px, px),
+						BackgroundColor3 = col, BorderSizePixel = 0,
+					}, holder)
+				end
+			end
+		end
+		return holder
+	end
+
+	local function puff(x, y, dx, dy, size, col, life)
+		local f = mk("Frame", {
+			Position = UDim2.fromOffset(x, y), Size = UDim2.fromOffset(size, size),
+			BackgroundColor3 = col, BorderSizePixel = 0,
+		}, layer)
+		local tw = tween(f, life, {
+			Position = UDim2.fromOffset(x + dx, y + dy), BackgroundTransparency = 1,
+		}, Enum.EasingStyle.Linear)
+		tw.Completed:Connect(function() f:Destroy() end)
+		return f
+	end
+
+	-- run fn every `interval` seconds while this scene is still the active one
+	local function every(tk, interval, fn, waitFirst)
+		task.spawn(function()
+			if waitFirst then task.wait(type(interval) == "function" and interval() or interval) end
+			while token == tk and gui.Parent do
+				if gui.Enabled then
+					local ok, err = pcall(fn)
+					if not ok then warn("[GrindBrawl] scene: " .. tostring(err)) end
+				end
+				task.wait(type(interval) == "function" and interval() or interval)
+			end
+		end)
+	end
+
+	local function loopTween(obj, t, goal, style)
+		TweenService:Create(obj, TweenInfo.new(t, style or Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), goal):Play()
+	end
+
+	----------------------------------------------------------------
+	-- sprites
+	----------------------------------------------------------------
+	local DRAGON_A = { -- wings up
+		"........kk................",
+		"........kRk...............",
+		"........kRrk..............",
+		"........kRrrRk.......kk...",
+		"........kRrrrrRk...kRRRRk.",
+		"......kRrrrrrrrRRkkRRRyRk.",
+		"......kRRrrrrrrRRRkkRRRRRk",
+		"..kRRRRRRRrrrrrrrRRRRkkRRk",
+		"kRRRoooooooooooooooooRRk..",
+		".kkkkkkkkkkkkkkkkkkkk.....",
+		".........kk........kk.....",
+	}
+	local DRAGON_B = { -- wings down
+		"..........................",
+		"..........................",
+		"..........................",
+		".....................kk...",
+		"...................kRRRRk.",
+		"..................kRRRyRk.",
+		"......kRRrrrrrrRRRkkRRRRRk",
+		"..kRRRRRRRrrrrrrrRRRRkkRRk",
+		"kRRRoooooooooooooooooRRk..",
+		".......kRRrrrrrrrrRRk.....",
+		"........kRrrrrrrrRRk......",
+		".........kRrrrrRk.........",
+		"..........kRrrk...........",
+		"...........kk.............",
+	}
+	local LAVA_PAL = { k = C(34, 6, 6), R = C(150, 22, 16), r = C(214, 56, 26), o = C(255, 150, 40), y = C(255, 230, 90) }
+	local ICE_PAL = { k = C(12, 34, 70), R = C(70, 126, 196), r = C(130, 196, 244), o = C(226, 246, 255), y = C(30, 50, 120) }
+
+	local GOBLIN = {
+		".kk....kk.",
+		"kggkkkkggk",
+		".kggggggk.",
+		".kgeggegk.",
+		".kggggggk.",
+		".kgwkkwgk.",
+		"..kkggkk..",
+		".kcccccck.",
+		"kgkccccbbk",
+		".kkccccbk.",
+		"..kGkkGk..",
+		".kkk..kkk.",
+	}
+	local GOBLIN_PAL = {
+		k = C(24, 34, 14), g = C(110, 190, 70), G = C(60, 120, 44), e = C(255, 70, 70),
+		w = C(245, 240, 220), c = C(120, 70, 44), b = C(160, 110, 60),
+	}
+
+	-- a dragon flying across the header lane; mirror = flies right-to-left
+	local function dragon(pal, mirror, y, dur, breath)
+		local px = 3
+		local startX, endX = -90, WIDTH + 10
+		if mirror then startX, endX = endX, startX end
+		local fly = mk("Frame", {
+			Size = UDim2.fromOffset(26 * px, 14 * px), BackgroundTransparency = 1,
+			Position = UDim2.fromOffset(startX, y),
+		}, layer)
+		local inner = mk("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1 }, fly)
+		loopTween(inner, 0.35, { Position = UDim2.fromOffset(0, -5) })
+		local a = sprite(inner, DRAGON_A, pal, px, mirror)
+		local b = sprite(inner, DRAGON_B, pal, px, mirror)
+		b.Visible = false
+		tween(fly, dur, { Position = UDim2.fromOffset(endX, y) }, Enum.EasingStyle.Linear)
+		task.spawn(function()
+			local t0, up = os.clock(), true
+			while fly.Parent and os.clock() - t0 < dur + 0.3 do
+				up = not up
+				a.Visible, b.Visible = up, not up
+				local ap = (fly.AbsolutePosition - layer.AbsolutePosition) / scaler.Scale
+				local mx, my = ap.X + (mirror and 2 or 76), ap.Y + 20
+				local dir = mirror and -1 or 1
+				for _ = 1, 2 do
+					puff(mx, my + rng:NextNumber(-3, 3), dir * rng:NextNumber(30, 55), rng:NextNumber(-8, 10),
+						rng:NextInteger(3, 5), pick(breath), 0.5)
+				end
+				task.wait(0.16)
+			end
+			if fly.Parent then fly:Destroy() end
+		end)
+	end
+
+	----------------------------------------------------------------
+	-- scenes
+	----------------------------------------------------------------
+	local BUILD = {}
+
+	BUILD.lava = function(tk)
+		local glow = mk("Frame", {
+			AnchorPoint = Vector2.new(0, 1), Position = UDim2.fromScale(0, 1), Size = UDim2.new(1, 0, 0, 80),
+			BackgroundColor3 = C(255, 120, 30), BorderSizePixel = 0,
+		}, layer)
+		mk("UIGradient", { Rotation = 90, Transparency = NumberSequence.new(1, 0.3) }, glow)
+		loopTween(glow, 1.4, { BackgroundColor3 = C(255, 196, 60) })
+
+		every(tk, 0.14, function() -- embers
+			local H = curHeight
+			puff(rng:NextNumber(0, WIDTH), H, rng:NextNumber(-30, 30), -H - 10, rng:NextInteger(2, 3),
+				rng:NextNumber() < 0.5 and C(255, 150, 40) or C(255, 222, 100), rng:NextNumber(4, 7))
+		end)
+		every(tk, function() return rng:NextNumber(7, 11) end, function()
+			dragon(LAVA_PAL, false, rng:NextInteger(4, 14), 6.5, { C(255, 140, 30), C(255, 222, 90), C(255, 80, 20) })
+		end)
+	end
+
+	BUILD.ice = function(tk)
+		for i, col in ipairs({ C(80, 255, 200), C(120, 160, 255) }) do
+			local band = mk("Frame", {
+				Position = UDim2.new(-0.2, 0, 0, 10 + i * 30), Size = UDim2.new(1.4, 0, 0, 46),
+				BackgroundColor3 = col, BackgroundTransparency = 0.6, BorderSizePixel = 0,
+			}, layer)
+			mk("UIGradient", { Transparency = NumberSequence.new({ kp(0, 1), kp(0.5, 0), kp(1, 1) }) }, band)
+			loopTween(band, 4 + i * 2, { Position = UDim2.new(-0.4, 0, 0, 10 + i * 30), BackgroundTransparency = 0.8 })
+		end
+		local frost = mk("Frame", {
+			AnchorPoint = Vector2.new(0, 1), Position = UDim2.fromScale(0, 1), Size = UDim2.new(1, 0, 0, 70),
+			BackgroundColor3 = C(190, 235, 255), BorderSizePixel = 0,
+		}, layer)
+		mk("UIGradient", { Rotation = 90, Transparency = NumberSequence.new(1, 0.55) }, frost)
+
+		every(tk, 0.12, function() -- snow
+			puff(rng:NextNumber(0, WIDTH), -4, rng:NextNumber(-25, 25), curHeight + 8, rng:NextInteger(2, 3),
+				C(240, 250, 255), rng:NextNumber(5, 9))
+		end)
+		every(tk, function() return rng:NextNumber(8, 12) end, function()
+			dragon(ICE_PAL, true, rng:NextInteger(4, 14), 6.5, { C(190, 240, 255), C(255, 255, 255), C(120, 200, 255) })
+		end)
+	end
+
+	BUILD.space = function(tk)
+		local starCols = { C(255, 255, 255), C(190, 220, 255), C(255, 200, 230) }
+		for _ = 1, 32 do
+			local s = rng:NextInteger(1, 3)
+			local st = mk("Frame", {
+				Position = UDim2.fromScale(rng:NextNumber(), rng:NextNumber()), Size = UDim2.fromOffset(s, s),
+				BackgroundColor3 = pick(starCols), BorderSizePixel = 0, BackgroundTransparency = rng:NextNumber(0, 0.3),
+			}, layer)
+			TweenService:Create(st, TweenInfo.new(rng:NextNumber(0.8, 2.4), Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true, rng:NextNumber(0, 2)),
+				{ BackgroundTransparency = 0.9 }):Play()
+		end
+
+		local planet = mk("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.82, 0.4), Size = UDim2.fromOffset(62, 62),
+			BackgroundColor3 = C(255, 255, 255), BorderSizePixel = 0,
+		}, layer)
+		mk("UICorner", { CornerRadius = UDim.new(1, 0) }, planet)
+		mk("UIGradient", { Rotation = 35, Color = ColorSequence.new(C(255, 170, 120), C(120, 60, 170)) }, planet)
+		loopTween(planet, 3.5, { Position = UDim2.fromScale(0.82, 0.42) })
+		local ring = mk("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.82, 0.4), Size = UDim2.fromOffset(112, 20),
+			BackgroundTransparency = 1, Rotation = -18,
+		}, layer)
+		mk("UICorner", { CornerRadius = UDim.new(1, 0) }, ring)
+		mk("UIStroke", { Color = C(255, 220, 170), Thickness = 2, Transparency = 0.25 }, ring)
+		loopTween(ring, 3.5, { Position = UDim2.fromScale(0.82, 0.42) })
+
+		every(tk, 0.5, function() -- fast far stars drifting left
+			puff(WIDTH, rng:NextNumber(0, curHeight), -WIDTH - 10, 0, 1, C(210, 225, 255), rng:NextNumber(2.5, 5))
+		end)
+		every(tk, function() return rng:NextNumber(5, 9) end, function() -- shooting star
+			local x, y = rng:NextNumber(WIDTH * 0.3, WIDTH), rng:NextNumber(0, 120)
+			local s = mk("Frame", {
+				Position = UDim2.fromOffset(x, y), Size = UDim2.fromOffset(26, 2), Rotation = -25,
+				BackgroundColor3 = C(230, 240, 255), BorderSizePixel = 0,
+			}, layer)
+			mk("UIGradient", { Transparency = NumberSequence.new(0, 1) }, s)
+			local tw = tween(s, 0.9, { Position = UDim2.fromOffset(x - 140, y + 65), BackgroundTransparency = 1 }, Enum.EasingStyle.Linear)
+			tw.Completed:Connect(function() s:Destroy() end)
+		end, true)
+	end
+
+	BUILD.murim = function(tk)
+		local moon = mk("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.62, 0, 0, 34), Size = UDim2.fromOffset(46, 46),
+			BackgroundColor3 = C(255, 255, 255), BorderSizePixel = 0,
+		}, layer)
+		mk("UICorner", { CornerRadius = UDim.new(1, 0) }, moon)
+		mk("UIGradient", { Rotation = 90, Color = ColorSequence.new(C(255, 240, 190), C(226, 196, 130)) }, moon)
+		mk("UIStroke", { Color = C(255, 230, 160), Thickness = 7, Transparency = 0.8 }, moon)
+		loopTween(moon, 4, { Position = UDim2.new(0.62, 0, 0, 38) })
+
+		local function ridge(color, minH, maxH, seed)
+			for x = 0, WIDTH, 10 do
+				local peak = 0.65 * (1 - math.abs(math.sin(x * 0.022 + seed))) + 0.35 * (1 - math.abs(math.sin(x * 0.07 + seed * 3)))
+				mk("Frame", {
+					AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, x, 1, 0),
+					Size = UDim2.fromOffset(11, minH + (maxH - minH) * peak), BackgroundColor3 = color, BorderSizePixel = 0,
+				}, layer)
+			end
+		end
+		ridge(C(46, 54, 58), 90, 210, 1)
+		ridge(C(34, 40, 42), 60, 150, 2.5)
+		local mist = mk("Frame", {
+			AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(-0.1, 0, 1, -30), Size = UDim2.new(1.2, 0, 0, 70),
+			BackgroundColor3 = C(180, 190, 186), BorderSizePixel = 0,
+		}, layer)
+		mk("UIGradient", { Rotation = 90, Transparency = NumberSequence.new({ kp(0, 1), kp(0.5, 0.78), kp(1, 1) }) }, mist)
+		loopTween(mist, 7, { Position = UDim2.new(-0.2, 0, 1, -30) })
+		ridge(C(22, 26, 26), 30, 90, 4)
+
+		every(tk, 0.4, function() -- petals
+			local f = puff(rng:NextNumber(0, WIDTH), -4, rng:NextNumber(-70, 10), curHeight + 8, 4,
+				pick({ C(232, 140, 150), C(250, 200, 205) }), rng:NextNumber(6, 10))
+			f.Size = UDim2.fromOffset(5, 3)
+			tween(f, 6, { Rotation = rng:NextInteger(-360, 360) }, Enum.EasingStyle.Linear)
+		end)
+		every(tk, 0.6, function() -- qi motes
+			puff(rng:NextNumber(0, WIDTH), curHeight, rng:NextNumber(-20, 20), -rng:NextNumber(120, 220), 2, C(255, 214, 120), rng:NextNumber(3, 5))
+		end)
+		every(tk, function() return rng:NextNumber(6, 10) end, function() -- sword qi slash
+			local s = mk("Frame", {
+				AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(WIDTH * 0.5, rng:NextNumber(60, 250)),
+				Size = UDim2.fromOffset(0, 3), Rotation = rng:NextInteger(-40, -15),
+				BackgroundColor3 = C(255, 226, 150), BorderSizePixel = 0,
+			}, layer)
+			mk("UIGradient", { Transparency = NumberSequence.new({ kp(0, 1), kp(0.5, 0), kp(1, 1) }) }, s)
+			tween(s, 0.14, { Size = UDim2.fromOffset(300, 3) })
+			task.delay(0.14, function()
+				tween(s, 0.3, { BackgroundTransparency = 1 })
+				task.delay(0.35, function() s:Destroy() end)
+			end)
+		end, true)
+	end
+
+	BUILD.hunter = function(tk)
+		local portal = mk("Frame", {
+			AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0, 14, 1, -2), Size = UDim2.fromOffset(78, 78),
+			BackgroundColor3 = C(255, 255, 255), BorderSizePixel = 0,
+		}, layer)
+		mk("UICorner", { CornerRadius = UDim.new(1, 0) }, portal)
+		local pg = mk("UIGradient", {
+			Color = ColorSequence.new({ ck(0, C(90, 60, 255)), ck(0.5, C(190, 90, 255)), ck(1, C(60, 160, 255)) }),
+		}, portal)
+		local pst = mk("UIStroke", { Color = C(150, 120, 255), Thickness = 3 }, portal)
+		loopTween(pst, 0.9, { Thickness = 6 })
+		local core = mk("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(0.6, 0.6),
+			BackgroundColor3 = C(10, 6, 30), BorderSizePixel = 0,
+		}, portal)
+		mk("UICorner", { CornerRadius = UDim.new(1, 0) }, core)
+		every(tk, 0.03, function() pg.Rotation = (os.clock() * 140) % 360 end)
+
+		local flash = mk("Frame", {
+			Size = UDim2.fromScale(1, 1), BackgroundColor3 = C(170, 140, 255), BackgroundTransparency = 1, BorderSizePixel = 0,
+		}, layer)
+		every(tk, function() return rng:NextNumber(8, 14) end, function()
+			flash.BackgroundTransparency = 0.78
+			tween(flash, 0.5, { BackgroundTransparency = 1 })
+		end, true)
+
+		every(tk, 0.22, function() -- mana motes
+			puff(rng:NextNumber(0, 44), curHeight - 24, rng:NextNumber(-10, 30), -rng:NextNumber(40, 100), rng:NextInteger(2, 3),
+				pick({ C(150, 120, 255), C(120, 220, 255) }), rng:NextNumber(1.5, 2.5))
+		end)
+
+		local alive = 0
+		every(tk, 2.6, function()
+			if alive >= 3 then return end
+			alive += 1
+			local fly = mk("Frame", {
+				AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0, 26, 1, -6),
+				Size = UDim2.fromOffset(30, 36), BackgroundTransparency = 1,
+			}, layer)
+			local sc = mk("UIScale", { Scale = 0.15 }, fly)
+			tween(sc, 0.5, { Scale = 1 }, Enum.EasingStyle.Back)
+			local inner = mk("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1 }, fly)
+			loopTween(inner, 0.22, { Position = UDim2.fromOffset(0, -4) })
+			sprite(inner, GOBLIN, GOBLIN_PAL, 3, false)
+			local tw = tween(fly, rng:NextNumber(7, 10), { Position = UDim2.new(0, WIDTH + 30, 1, -6) }, Enum.EasingStyle.Linear)
+			tw.Completed:Connect(function()
+				alive -= 1
+				fly:Destroy()
+			end)
+		end)
+	end
+
+	----------------------------------------------------------------
+	-- apply a theme's scene + card transparency + neon colours
+	----------------------------------------------------------------
+	local cards
+	function Scenes.apply(name, animate)
+		local def = THEMES[name]
+		if not def then return end
+		token += 1
+		layer:ClearAllChildren()
+		local build = def.scene and BUILD[def.scene]
+		scene.Visible = build ~= nil
+		if build then
+			grad.Color = ColorSequence.new(def.bgTop, def.bgBot)
+			veilGradient.Transparency = SCENE_VEIL
+			build(token)
+		else
+			veilGradient.Transparency = BASE_VEIL
+		end
+		Scenes.neonA, Scenes.neonB = def.neonA or PINK, def.neonB or TEAL
+
+		if not cards then
+			cards = {}
+			for _, d in ipairs(window:GetDescendants()) do
+				if d:IsA("Frame") and not d:IsDescendantOf(scene) and math.abs(d.BackgroundTransparency - 0.06) < 0.001 then
+					cards[#cards + 1] = d
+				end
+			end
+		end
+		local goal = def.card or 0.06
+		for _, d in ipairs(cards) do
+			if d.Parent then
+				if animate then tween(d, 0.4, { BackgroundTransparency = goal }) else d.BackgroundTransparency = goal end
+			end
+		end
+	end
+end
+
 do
 	local rng = Random.new(7)
 	local glyphs = { "✨", "✨", "💫", "✨", "⭐" }
@@ -446,7 +938,7 @@ do
 		veilGradient.Rotation = 90 + math.sin(t * 0.5) * 28
 		avatar.Rotation = math.sin(t * 1.8) * 5
 		if mixValue.Value > 0.001 then
-			local neon = PINK:Lerp(TEAL, (math.sin(t * 1.6) + 1) / 2)
+			local neon = Scenes.neonA:Lerp(Scenes.neonB, (math.sin(t * 1.6) + 1) / 2)
 			windowStroke.Color = THEMES.light.ink_b:Lerp(neon, mixValue.Value)
 		else
 			windowStroke.Color = THEMES.light.ink_b
@@ -602,7 +1094,7 @@ local body = create("Frame", {
 	ZIndex = 3,
 }, window)
 
-local TAB_COUNT = 4
+local TAB_COUNT = 5
 
 local tabBar = create("Frame", {
 	Size = UDim2.new(1, 0, 0, 38),
@@ -695,7 +1187,7 @@ local function newTab(name, label)
 		BackgroundTransparency = 1,
 		Text = label,
 		TextColor3 = INK,
-		TextSize = 12,
+		TextSize = 11,
 		Font = FONT_TITLE,
 		AutoButtonColor = false,
 		TextTruncate = Enum.TextTruncate.AtEnd,
@@ -710,6 +1202,7 @@ end
 local colFarm = newTab("Farm", "🌺 Farm")
 local colBrawl = newTab("Brawl", "🥊 Brawl")
 local colStats = newTab("Gains", "✨ Gains")
+local colThemes = newTab("Themes", "🎨 Themes")
 local colCfg = newTab("Config", "⚙️ Config")
 selectTab("Farm", true)
 
@@ -1041,6 +1534,67 @@ local function addTile(grid, name, valueColor, icon)
 	return function(text) if value.Text ~= text then value.Text = text end end,
 		function(text) if sub.Text ~= text then sub.Text = text end end
 end
+
+------------------------------------------------------------------------
+-- THEMES TAB
+------------------------------------------------------------------------
+parentFrame = colThemes
+sectionLabel("🎨 PICK A THEME")
+
+do
+	local grid = create("Frame", {
+		LayoutOrder = nextOrder(),
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+	}, parentFrame)
+	create("UIGridLayout", {
+		CellSize = UDim2.new(0.5, -5, 0, 40),
+		CellPadding = UDim2.fromOffset(9, 9),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	}, grid)
+	local chips = {}
+	for i, name in ipairs(Scenes.order) do
+		local def = THEMES[name]
+		local chip = create("TextButton", {
+			LayoutOrder = i,
+			BackgroundColor3 = CREAM,
+			Text = def.icon .. "  " .. def.label,
+			TextColor3 = INK,
+			TextSize = 14,
+			Font = FONT_TITLE,
+			AutoButtonColor = false,
+		}, grid)
+		create("UICorner", { CornerRadius = UDim.new(0, 12) }, chip)
+		create("UIStroke", { Color = INK, Thickness = 2 }, chip)
+		chip.Activated:Connect(function() setTheme(name, true) end)
+		chips[name] = chip
+	end
+	Scenes.refreshChips = function()
+		for name, chip in pairs(chips) do
+			local on = name == currentTheme
+			paint(chip, "BackgroundColor3", on and "pink" or "cream_b", 0.2)
+			paint(chip, "TextColor3", on and "onPink" or "ink_t", 0.2)
+		end
+	end
+	Scenes.refreshChips()
+end
+
+local themeInfo = addTextRow("Sakura - the classic pixel-stitch look", 46)
+local THEME_BLURBS = {
+	light = "Sakura - the classic pixel-stitch look",
+	dark = "Midnight - dark mode with a neon border",
+	lava = "Lava - a pixel dragon breathes fire over a glowing magma sky",
+	ice = "Ice - an ice dragon glides through snow and aurora",
+	space = "Space - stars, a ringed planet and shooting stars",
+	murim = "Murim - ink mountains, petals, qi and sword slashes",
+	hunter = "Hunter - goblins pour out of a gate portal",
+}
+Scenes.setBlurb = function(name)
+	local s = THEME_BLURBS[name] or ""
+	if themeInfo.Text ~= s then themeInfo.Text = s end
+end
+addLabel("The 🌙 button in the header also cycles through every theme. Your pick is remembered. Dark mode and the pixel-stitch background switches are still in Farm.", 62)
 
 ------------------------------------------------------------------------
 -- BRAWL TAB: status pill
@@ -1392,7 +1946,11 @@ pingStatusLabel = addTextRow("Ping: -- ms | Ready")
 sectionLabel("🎨 APPEARANCE")
 
 darkSwitch = addSwitch("Dark mode", false, function(on)
-	setTheme(on and "dark" or "light", true)
+	if on then
+		setTheme("dark", true)
+	elseif currentTheme == "dark" then
+		setTheme("light", true)
+	end
 end, "dark")
 
 local realBgTried = false
@@ -2196,8 +2754,9 @@ end)
 -- Theme
 ------------------------------------------------------------------------
 setTheme = function(name, animate)
-	if name ~= "light" and name ~= "dark" then return end
-	local dark = name == "dark"
+	local def = THEMES[name]
+	if not def then return end
+	local dark = name ~= "light"
 	currentTheme = name
 	for obj, props in pairs(bindings) do
 		if obj.Parent then
@@ -2210,7 +2769,7 @@ setTheme = function(name, animate)
 			end
 		end
 	end
-	local dimGoal = dark and 0.22 or 1
+	local dimGoal = def.dim or (dark and 0.22 or 1)
 
 	for _, d in ipairs(gui:GetDescendants()) do
 		if d:IsA("TextLabel") then
@@ -2241,15 +2800,19 @@ setTheme = function(name, animate)
 		dim.BackgroundTransparency = dimGoal
 		mixValue.Value = dark and 1 or 0
 	end
-	themeBtn.Text = dark and "☀️" or "🌙"
-	if darkSwitch and darkSwitch.Get() ~= dark then darkSwitch:Set(dark, true) end
+	themeBtn.Text = def.icon or "🌙"
+	if darkSwitch and darkSwitch.Get() ~= (name == "dark") then darkSwitch:Set(name == "dark", true) end
+	Scenes.apply(name, animate)
+	if Scenes.refreshChips then Scenes.refreshChips() end
+	if Scenes.setBlurb then Scenes.setBlurb(name) end
 	pcall(function()
 		if writefile then writefile("grindbrawl_theme.txt", name) end
 	end)
 end
 
 themeBtn.Activated:Connect(function()
-	setTheme(currentTheme == "dark" and "light" or "dark", true)
+	local i = table.find(Scenes.order, currentTheme) or 1
+	setTheme(Scenes.order[i % #Scenes.order + 1], true)
 end)
 
 do
@@ -2257,7 +2820,7 @@ do
 	pcall(function()
 		if isfile and readfile and isfile("grindbrawl_theme.txt") then saved = readfile("grindbrawl_theme.txt") end
 	end)
-	if saved == "dark" then setTheme("dark", false) end
+	if saved ~= "light" and THEMES[saved] then setTheme(saved, false) end
 end
 
 ------------------------------------------------------------------------
