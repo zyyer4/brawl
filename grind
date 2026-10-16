@@ -612,6 +612,7 @@ local gui = create("ScreenGui", {
 }, playerGui)
 
 local mixValue = create("NumberValue", { Value = 0 }, gui)
+local scene
 
 local root = create("Frame", {
 	AnchorPoint = Vector2.new(0.5, 0.5),
@@ -711,7 +712,7 @@ do
 
 	pixelLayer.ZIndex = 0
 	realImage.ZIndex = 0
-	local scene = mk("Frame", {
+	scene = mk("Frame", {
 		Name = "Scene", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1,
 		BorderSizePixel = 0, ZIndex = 1, Visible = false, ClipsDescendants = true,
 	}, window)
@@ -2149,14 +2150,31 @@ do
 		overlay:ClearAllChildren()
 		world:ClearAllChildren()
 		local build = def.scene and BUILD[def.scene]
-		scene.Visible = build ~= nil
+		scene.Visible = true
+		grad.Color = ColorSequence.new(def.bgTop or def.bg, def.bgBot or def.bg)
+		veilGradient.Transparency = SCENE_VEIL
 		if build then
-			grad.Color = ColorSequence.new(def.bgTop, def.bgBot)
-			veilGradient.Transparency = SCENE_VEIL
 			local ok, err = pcall(build, token)
 			if not ok then warn("[GrindBrawl] scene build: " .. tostring(err)) end
 		else
-			veilGradient.Transparency = BASE_VEIL
+			-- Sakura and Midnight get their own looping cinematic particle treatment too.
+			local paletteA = def.neonA or (name == "light" and C(255, 150, 190) or C(150, 130, 255))
+			local paletteB = def.neonB or (name == "light" and C(255, 225, 235) or C(80, 200, 255))
+			for i = 1, 18 do
+				local orb = mk("Frame", {
+					AnchorPoint = Vector2.new(0.5, 0.5),
+					Position = UDim2.fromScale(rng:NextNumber(0.04, 0.96), rng:NextNumber(0.05, 0.95)),
+					Size = UDim2.fromOffset(rng:NextInteger(5, 18), rng:NextInteger(5, 18)),
+					BackgroundColor3 = i % 2 == 0 and paletteA or paletteB,
+					BackgroundTransparency = rng:NextNumber(0.18, 0.48),
+					BorderSizePixel = 0, ZIndex = 1,
+				}, layer)
+				mk("UICorner", { CornerRadius = UDim.new(1, 0) }, orb)
+				loopTween(orb, rng:NextNumber(3, 7), {
+					Position = UDim2.fromScale(rng:NextNumber(0.04, 0.96), rng:NextNumber(0.05, 0.95)),
+					Rotation = rng:NextInteger(-180, 180),
+				})
+			end
 		end
 		Scenes.neonA, Scenes.neonB = def.neonA or PINK, def.neonB or TEAL
 
@@ -2910,6 +2928,9 @@ end
 ------------------------------------------------------------------------
 -- THEMES TAB
 ------------------------------------------------------------------------
+local toggleCinematic
+local cinematicButton
+
 parentFrame = colThemes
 sectionLabel("🎨 PICK A THEME")
 
@@ -2975,6 +2996,24 @@ Scenes.setBlurb = function(name)
 	if themeInfo.Text ~= s then themeInfo.Text = s end
 end
 addLabel("The 🌙 button in the header also cycles through every theme. Your pick is remembered. Dark mode and the pixel-stitch background switches are still in Farm.", 62)
+
+cinematicButton = create("TextButton", {
+	LayoutOrder = nextOrder(),
+	Size = UDim2.new(1, 0, 0, 42),
+	BackgroundColor3 = INK,
+	Text = "🎬  ENTER CINEMATIC MODE",
+	TextColor3 = CREAM,
+	TextSize = 14,
+	Font = FONT_TITLE,
+	AutoButtonColor = false,
+}, parentFrame)
+create("UICorner", { CornerRadius = UDim.new(0, 12) }, cinematicButton)
+create("UIStroke", { Color = PINK, Thickness = 2 }, cinematicButton)
+Skin.decorate(cinematicButton, "raised", UDim.new(0, 12))
+Skin.swatch(cinematicButton, PINK, TEAL, Color3.fromRGB(170, 120, 255))
+cinematicButton.Activated:Connect(function()
+	if toggleCinematic then toggleCinematic() end
+end)
 
 ------------------------------------------------------------------------
 -- BRAWL TAB: status pill
@@ -4054,6 +4093,117 @@ do
 		end
 	end
 end
+
+------------------------------------------------------------------------
+-- CINEMATIC THEME MODE (theme-only presentation; gameplay logic is untouched)
+------------------------------------------------------------------------
+local cinematic = false
+local cinematicSaved = nil
+local cinematicHint
+local cinematicExitButton
+local function setCinematic(on)
+	if cinematic == on then return end
+	cinematic = on
+	if on then
+		cinematicSaved = {
+			rootSize = root.Size, rootPosition = root.Position, scale = scaler.Scale,
+			curHeight = curHeight, header = header.Visible, body = body.Visible, footer = footer.Visible,
+			shadowVisible = shadow.Visible, bgTransparency = window.BackgroundTransparency,
+			strokeEnabled = windowStroke.Enabled, veil = veil.Visible, dim = dim.Visible,
+			pixel = pixelLayer.Visible, image = realImage.Visible,
+		}
+		local cam = workspace.CurrentCamera
+		local vpSize = cam and cam.ViewportSize or Vector2.new(1280, 720)
+		root.Position = UDim2.fromScale(0.5, 0.5)
+		root.Size = UDim2.fromOffset(vpSize.X, vpSize.Y)
+		scaler.Scale = 1
+		header.Visible, body.Visible, footer.Visible = false, false, false
+		shadow.Visible = false
+		window.BackgroundTransparency = 1
+		windowStroke.Enabled = false
+		veil.Visible, dim.Visible, pixelLayer.Visible, realImage.Visible = false, false, false, false
+		-- Force a scene even for the two classic palettes.
+		scene.Visible = true
+		cinematicHint = Instance.new("TextLabel")
+		cinematicHint.Name = "CinematicExitHint"
+		cinematicHint.AnchorPoint = Vector2.new(0.5, 1)
+		cinematicHint.Position = UDim2.new(0.5, 0, 1, -24)
+		cinematicHint.Size = UDim2.new(1, -40, 0, 28)
+		cinematicHint.BackgroundTransparency = 1
+		cinematicHint.Text = "CINEMATIC THEME SHOWCASE   •   tap EXIT or press ESC / C"
+		cinematicHint.TextColor3 = THEMES[currentTheme].neonA or PINK
+		cinematicHint.TextStrokeTransparency = 0.35
+		cinematicHint.TextSize = 14
+		cinematicHint.Font = FONT_TITLE
+		cinematicHint.ZIndex = 20
+		cinematicHint.Parent = gui
+		TweenService:Create(cinematicHint, TweenInfo.new(1.4, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
+			TextTransparency = 0.65,
+		}):Play()
+		-- Large, touch-friendly exit control stays available while the window chrome is hidden.
+		cinematicExitButton = Instance.new("TextButton")
+		cinematicExitButton.Name = "CinematicMobileExit"
+		cinematicExitButton.AnchorPoint = Vector2.new(1, 0)
+		cinematicExitButton.Position = UDim2.new(1, -18, 0, 18)
+		cinematicExitButton.Size = UDim2.fromOffset(156, 52)
+		cinematicExitButton.BackgroundColor3 = THEMES[currentTheme].neonA or PINK
+		cinematicExitButton.BackgroundTransparency = 0.12
+		cinematicExitButton.BorderSizePixel = 0
+		cinematicExitButton.Text = "✕  EXIT CINEMATIC"
+		cinematicExitButton.TextColor3 = Color3.new(1, 1, 1)
+		cinematicExitButton.TextSize = 15
+		cinematicExitButton.Font = FONT_TITLE
+		cinematicExitButton.AutoButtonColor = true
+		cinematicExitButton.Active = true
+		cinematicExitButton.Selectable = true
+		cinematicExitButton.ZIndex = 100
+		cinematicExitButton.Parent = gui
+		local exitCorner = Instance.new("UICorner")
+		exitCorner.CornerRadius = UDim.new(0, 14)
+		exitCorner.Parent = cinematicExitButton
+		local exitStroke = Instance.new("UIStroke")
+		exitStroke.Color = Color3.new(1, 1, 1)
+		exitStroke.Transparency = 0.2
+		exitStroke.Thickness = 1.5
+		exitStroke.Parent = cinematicExitButton
+		cinematicExitButton.Activated:Connect(function()
+		setCinematic(false)
+		if cinematicButton then cinematicButton.Text = "🎬  ENTER CINEMATIC MODE" end
+	end)
+		if cinematicButton then cinematicButton.Text = "✕  EXIT CINEMATIC MODE" end
+	else
+		if cinematicHint then cinematicHint:Destroy(); cinematicHint = nil end
+		if cinematicExitButton then cinematicExitButton:Destroy(); cinematicExitButton = nil end
+		local old = cinematicSaved
+		if old then
+			root.Size, root.Position, scaler.Scale, curHeight = old.rootSize, old.rootPosition, old.scale, old.curHeight
+			header.Visible, body.Visible, footer.Visible = old.header, old.body, old.footer
+			shadow.Visible = old.shadowVisible
+			window.BackgroundTransparency = old.bgTransparency
+			windowStroke.Enabled = old.strokeEnabled
+			veil.Visible, dim.Visible, pixelLayer.Visible, realImage.Visible = old.veil, old.dim, old.pixel, old.image
+		end
+		if cinematicButton then cinematicButton.Text = "🎬  ENTER CINEMATIC MODE" end
+		cinematicSaved = nil
+	end
+end
+toggleCinematic = function() setCinematic(not cinematic) end
+track(UserInputService.InputBegan:Connect(function(input, processed)
+	if cinematic and not processed and (input.KeyCode == Enum.KeyCode.Escape or input.KeyCode == Enum.KeyCode.C) then
+		setCinematic(false)
+	end
+end))
+track(RunService.RenderStepped:Connect(function()
+	if cinematic and root.Parent then
+		local cam = workspace.CurrentCamera
+		if cam then
+			local size = cam.ViewportSize
+			if root.Size.X.Offset ~= size.X or root.Size.Y.Offset ~= size.Y then
+				root.Size = UDim2.fromOffset(size.X, size.Y)
+			end
+		end
+	end
+end))
 
 ------------------------------------------------------------------------
 -- Minimise / show / close
