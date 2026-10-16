@@ -65,6 +65,7 @@ local state = {
 	eggsEaten = 0,
 	antiAfk = true,
 	keepSeated = true,
+	mapTrip = false,
 	seatedSeen = false,
 	lastSeatCF = nil,
 	brawlStartedAt = nil,
@@ -3765,13 +3766,14 @@ local function newTab(name, label)
 		Size = UDim2.new(1, 0, 1, 0),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
-		ScrollBarThickness = 3,
+		ScrollBarThickness = 12,
 		ScrollBarImageColor3 = INK,
+		ScrollBarImageTransparency = 0.1,
 		CanvasSize = UDim2.new(),
 		AutomaticCanvasSize = Enum.AutomaticSize.Y,
 	}, wrapper)
 	create("UIPadding", {
-		PaddingRight = UDim.new(0, 6), PaddingBottom = UDim.new(0, 8),
+		PaddingRight = UDim.new(0, 16), PaddingBottom = UDim.new(0, 8),
 		PaddingLeft = UDim.new(0, 2), PaddingTop = UDim.new(0, 2),
 	}, page)
 	create("UIListLayout", { Padding = UDim.new(0, 9), SortOrder = Enum.SortOrder.LayoutOrder }, page)
@@ -4233,6 +4235,931 @@ cinematicButton.Activated:Connect(function()
 end)
 
 ------------------------------------------------------------------------
+-- THEME MAPS: build navigable, local Workspace maps from the UI themes.
+-- These are generated locally by this client script; they do not publish to
+-- the Muscle Legends server or replicate to other players.
+------------------------------------------------------------------------
+local ThemeMapSystem = (function()
+	local World = game:GetService("Workspace")
+	local MAP_FOLDER_NAME = "GrindBrawlThemeMaps"
+	local mapFolder = World:FindFirstChild(MAP_FOLDER_NAME)
+	if mapFolder and not mapFolder:IsA("Folder") then
+		mapFolder:Destroy()
+		mapFolder = nil
+	end
+	if not mapFolder then
+		mapFolder = Instance.new("Folder")
+		mapFolder.Name = MAP_FOLDER_NAME
+		mapFolder.Parent = World
+	end
+
+	local centers = {}
+	local MAP_BASE_X, MAP_BASE_Z, MAP_SPACING, MAP_Y = 12000, 12000, 1100, 120
+	local FNAF_CENTER = Vector3.new(10000, 150, 0) -- FNAF 2 map: ~10k studs from spawn (updated when it loads)
+	local BR_CENTER = Vector3.new(60000, 150, 60000) -- Backrooms: far from the game and every other theme map
+	for i, name in ipairs(Scenes.order) do
+		local row = math.floor((i - 1) / 3)
+		local col = (i - 1) % 3
+		centers[name] = Vector3.new(MAP_BASE_X + col * MAP_SPACING, MAP_Y, MAP_BASE_Z + row * MAP_SPACING)
+	end
+
+	local FLOOR_COLORS = {
+		light = Color3.fromRGB(246, 214, 223), dark = Color3.fromRGB(16, 16, 34),
+		lava = Color3.fromRGB(50, 14, 10), ice = Color3.fromRGB(158, 214, 238),
+		space = Color3.fromRGB(12, 8, 34), murim = Color3.fromRGB(44, 38, 30),
+		hunter = Color3.fromRGB(14, 18, 48), jungle = Color3.fromRGB(39, 75, 39),
+		fnaf = Color3.fromRGB(28, 12, 12),
+	}
+
+	local function palette(name)
+		local def = THEMES[name] or THEMES.dark
+		local main = def.neonA or def.pink or PINK
+		local second = def.neonB or def.teal or TEAL
+		return {
+			floor = FLOOR_COLORS[name] or def.bg,
+			base = (name == "light" and Color3.fromRGB(186, 121, 140)) or (name == "dark" and Color3.fromRGB(8, 8, 22)) or (def.bgTop or def.bg),
+			main = main, second = second,
+			bright = def.cream_t or CREAM,
+			dark = def.ink_b or INK,
+			warm = Color3.fromRGB(244, 190, 92),
+			wood = (name == "jungle" and Color3.fromRGB(93, 66, 42)) or (name == "murim" and Color3.fromRGB(82, 55, 32)) or Color3.fromRGB(105, 55, 52),
+			rock = (name == "ice" and Color3.fromRGB(185, 224, 246)) or (name == "lava" and Color3.fromRGB(45, 25, 23)) or Color3.fromRGB(58, 60, 82),
+		}
+	end
+
+	local function piece(model, name, size, offset, color, material, transparency, collide, rotation, className, shape)
+		local p = Instance.new(className or "Part")
+		p.Name = name
+		p.Anchored = true
+		p.CanCollide = collide == true
+		p.CanTouch = collide == true
+		p.CanQuery = collide == true
+		p.CastShadow = true
+		p.Size = size
+		p.Color = color
+		p.Material = material or Enum.Material.SmoothPlastic
+		p.Transparency = transparency or 0
+		p.TopSurface = Enum.SurfaceType.Smooth
+		p.BottomSurface = Enum.SurfaceType.Smooth
+		local cf = CFrame.new(offset)
+		if rotation then cf = cf * CFrame.Angles(math.rad(rotation[1] or 0), math.rad(rotation[2] or 0), math.rad(rotation[3] or 0)) end
+		p.CFrame = cf
+		if shape and p:IsA("Part") then p.Shape = shape end
+		p.Parent = model
+		return p
+	end
+
+	local function at(center, x, y, z)
+		return center + Vector3.new(x, y, z)
+	end
+
+	local function box(model, center, name, size, x, y, z, color, material, collide, rot, transparency, className, shape)
+		-- Permit concise calls where the class name immediately follows rotation.
+		if type(transparency) == "string" and className == nil then
+			className, transparency = transparency, nil
+		end
+		return piece(model, name, size, at(center, x, y, z), color, material, transparency, collide, rot, className, shape)
+	end
+
+	local function orb(model, center, name, size, x, y, z, color, material, transparency)
+		return box(model, center, name, size, x, y, z, color, material or Enum.Material.SmoothPlastic, false, nil, transparency, "Part", Enum.PartType.Ball)
+	end
+
+	local function addTree(model, center, pal, x, z, scale)
+		scale = scale or 1
+		local trunkH = 23 * scale
+		box(model, center, "Tree_Trunk", Vector3.new(6 * scale, trunkH, 6 * scale), x, 6 + trunkH / 2, z, pal.wood, Enum.Material.Wood, true)
+		orb(model, center, "Tree_Canopy", Vector3.new(28 * scale, 22 * scale, 28 * scale), x, 6 + trunkH + 6 * scale, z, pal.main, Enum.Material.Grass)
+		orb(model, center, "Tree_Canopy_2", Vector3.new(20 * scale, 18 * scale, 20 * scale), x + 8 * scale, 6 + trunkH + 12 * scale, z - 2 * scale, pal.second, Enum.Material.Grass)
+	end
+
+	local function addRingMarkers(model, center, pal, radius, count, y)
+		for i = 1, count do
+			local a = (math.pi * 2 * i) / count
+			orb(model, center, "Theme_Ring_Light", Vector3.new(4, 4, 4), math.cos(a) * radius, y, math.sin(a) * radius, (i % 2 == 0 and pal.main or pal.second), Enum.Material.Neon)
+		end
+	end
+
+	local function addPagoda(model, center, pal, isMurim)
+		local woodMaterial = Enum.Material.WoodPlanks
+		box(model, center, "Pagoda_Foundation", Vector3.new(74, 4, 66), 0, 8, -5, pal.wood, woodMaterial, true)
+		for _, x in ipairs({-23, 23}) do
+			for _, z in ipairs({-24, 14}) do
+				box(model, center, "Pagoda_Pillar", Vector3.new(6, 25, 6), x, 20, z, pal.warm, woodMaterial, true)
+			end
+		end
+		box(model, center, "Pagoda_Roof_Lower", Vector3.new(94, 5, 84), 0, 16, -5, pal.main, Enum.Material.Slate, true)
+		box(model, center, "Pagoda_Roof_Middle", Vector3.new(70, 4, 64), 0, 26, -5, isMurim and pal.warm or pal.second, Enum.Material.Slate, true)
+		box(model, center, "Pagoda_Roof_Top", Vector3.new(46, 4, 43), 0, 35, -5, pal.main, Enum.Material.Slate, true)
+		box(model, center, "Pagoda_Crown", Vector3.new(5, 14, 5), 0, 44, -5, pal.warm, Enum.Material.Metal, false)
+		box(model, center, "Pagoda_Entry", Vector3.new(19, 18, 5), 0, 17, 22, pal.dark, Enum.Material.WoodPlanks, true)
+	end
+
+	local function buildMap(name)
+		local existing = mapFolder:FindFirstChild("Map_" .. name)
+		if existing and existing:IsA("Model") then return existing end
+		local center = centers[name]
+		if not center then error("Unknown theme map: " .. tostring(name)) end
+		local pal = palette(name)
+		local map = Instance.new("Model")
+		map.Name = "Map_" .. name
+		map:SetAttribute("GrindBrawlThemeMap", true)
+		map:SetAttribute("ThemeName", name)
+		map.Parent = mapFolder
+
+		local base = box(map, center, "Island_Base", Vector3.new(320, 12, 320), 0, 0, 0, pal.base, Enum.Material.Slate, true)
+		map.PrimaryPart = base
+		box(map, center, "Walkable_Surface", Vector3.new(300, 0.6, 300), 0, 6.25, 0, pal.floor, name == "jungle" and Enum.Material.Grass or Enum.Material.SmoothPlastic, true)
+		box(map, center, "Border_North", Vector3.new(320, 2, 4), 0, 6.8, -157, pal.main, Enum.Material.Neon, false)
+		box(map, center, "Border_South", Vector3.new(320, 2, 4), 0, 6.8, 157, pal.main, Enum.Material.Neon, false)
+		box(map, center, "Border_East", Vector3.new(4, 2, 320), 157, 6.8, 0, pal.second, Enum.Material.Neon, false)
+		box(map, center, "Border_West", Vector3.new(4, 2, 320), -157, 6.8, 0, pal.second, Enum.Material.Neon, false)
+		box(map, center, "Arrival_Pad", Vector3.new(24, 0.5, 24), 0, 6.8, 0, pal.second, Enum.Material.Neon, false)
+		addRingMarkers(map, center, pal, 133, 16, 8.2)
+
+		if name == "light" then
+			addPagoda(map, center, pal, false)
+			for _, pos in ipairs({{-105,-95},{105,-95},{-105,90},{105,90}}) do addTree(map, center, pal, pos[1], pos[2], 1) end
+			for i = 1, 9 do
+				local x = -72 + (i - 1) * 18
+				orb(map, center, "Floating_Petal", Vector3.new(3, 1, 2), x, 26 + (i % 3) * 3, -48 + (i % 2) * 18, pal.bright, Enum.Material.Neon, 0.12)
+			end
+
+		elseif name == "dark" then
+			orb(map, center, "Midnight_Moon", Vector3.new(46, 46, 46), -91, 61, -88, Color3.fromRGB(204, 215, 255), Enum.Material.Neon, 0.12)
+			for i = 1, 10 do
+				local a = math.pi * 2 * i / 10
+				local x, z = math.cos(a) * 101, math.sin(a) * 101
+				local h = 25 + (i % 4) * 13
+				box(map, center, "Midnight_Tower", Vector3.new(13, h, 13), x, 6 + h / 2, z, pal.dark, Enum.Material.Slate, true)
+				orb(map, center, "Tower_Light", Vector3.new(5, 5, 5), x, 8 + h, z, i % 2 == 0 and pal.main or pal.second, Enum.Material.Neon)
+			end
+			for i = 1, 14 do
+				local a = math.pi * 2 * i / 14
+				box(map, center, "Moon_Ring_Segment", Vector3.new(3, 2, 24), math.cos(a) * 45, 31, math.sin(a) * 45, pal.second, Enum.Material.Neon, false, {0, -math.deg(a), 0}, 0.15)
+			end
+
+		elseif name == "lava" then
+			local layers = {{68,10,9},{54,9,17},{40,8,25},{27,7,32}}
+			for i, layer in ipairs(layers) do
+				box(map, center, "Volcano_Tier_" .. i, Vector3.new(layer[1], layer[2], layer[1]), 0, 6 + layer[3], -12, i == 4 and pal.main or pal.rock, Enum.Material.Basalt, true)
+			end
+			orb(map, center, "Lava_Crater", Vector3.new(22, 3, 22), 0, 44, -12, Color3.fromRGB(255, 72, 26), Enum.Material.Neon)
+			box(map, center, "Lava_Stream_A", Vector3.new(105, 0.7, 8), -60, 6.8, 54, pal.main, Enum.Material.Neon, false, {0, 0, -13})
+			box(map, center, "Lava_Stream_B", Vector3.new(72, 0.7, 7), 62, 6.85, -46, pal.warm, Enum.Material.Neon, false, {0, 0, 18})
+			for i, pos in ipairs({{-100,78},{95,73},{-112,-65},{106,-75},{0,112}}) do
+				box(map, center, "Basalt_Spike", Vector3.new(15, 44 + (i % 3) * 8, 15), pos[1], 28 + (i % 3) * 4, pos[2], pal.rock, Enum.Material.Basalt, true, {8 * (i % 2), i * 17, -12 + i * 5}, "WedgePart")
+			end
+
+		elseif name == "ice" then
+			for i, pos in ipairs({{-98,-88},{95,-90},{-110,62},{104,70},{-58,108},{58,112},{0,-112}}) do
+				local height = 30 + (i % 4) * 9
+				box(map, center, "Ice_Crystal", Vector3.new(11, height, 11), pos[1], 6 + height / 2, pos[2], pal.second, Enum.Material.Ice, true, {i * 3, i * 19, (i % 2 == 0 and 8 or -8)}, "WedgePart")
+				box(map, center, "Ice_Crystal_Facet", Vector3.new(6, height * 0.72, 6), pos[1] + 7, 6 + height * 0.36, pos[2] - 4, pal.main, Enum.Material.Ice, false, {-i * 4, i * 12, 12}, "WedgePart", nil)
+			end
+			for _, x in ipairs({-32,32}) do box(map, center, "Frozen_Gate_Pillar", Vector3.new(9, 42, 9), x, 27, -88, pal.bright, Enum.Material.Ice, true) end
+			box(map, center, "Frozen_Gate_Top", Vector3.new(72, 8, 10), 0, 48, -88, pal.main, Enum.Material.Ice, true)
+			box(map, center, "Glacier_Path", Vector3.new(14, 0.7, 112), 0, 6.8, -52, pal.second, Enum.Material.Neon, false, {0, 0, 0}, 0.35)
+
+		elseif name == "space" then
+			orb(map, center, "Cosmic_Planet", Vector3.new(54, 54, 54), 0, 54, -35, Color3.fromRGB(92, 53, 156), Enum.Material.SmoothPlastic)
+			for i = 1, 20 do
+				local a = math.pi * 2 * i / 20
+				box(map, center, "Planet_Ring_Segment", Vector3.new(4, 2, 30), math.cos(a) * 53, 52, -35 + math.sin(a) * 53, pal.second, Enum.Material.Neon, false, {12, -math.deg(a), 18}, 0.08)
+			end
+			orb(map, center, "Moon", Vector3.new(22, 22, 22), 84, 29, -92, pal.bright, Enum.Material.SmoothPlastic)
+			box(map, center, "Rocket_Body", Vector3.new(12, 44, 12), -77, 28, 62, pal.bright, Enum.Material.Metal, true, {0, 0, -22})
+			orb(map, center, "Rocket_Window", Vector3.new(9, 9, 3), -77, 34, 54, pal.second, Enum.Material.Neon)
+			for i = 1, 28 do
+				local x = math.sin(i * 17.3) * 135
+				local z = math.cos(i * 9.7) * 135
+				orb(map, center, "Star", Vector3.new(2 + (i % 3), 2 + (i % 3), 2 + (i % 3)), x, 10 + (i % 7) * 7, z, i % 2 == 0 and pal.main or pal.second, Enum.Material.Neon, 0.1)
+			end
+
+		elseif name == "murim" then
+			addPagoda(map, center, pal, true)
+			for i, pos in ipairs({{-120,-95},{120,-80},{-120,83},{120,95}}) do
+				local h = 48 + (i % 2) * 18
+				box(map, center, "Murim_Mountain", Vector3.new(50, h, 52), pos[1], 6 + h / 2, pos[2], pal.rock, Enum.Material.Slate, true, {0, i * 22, 0}, "WedgePart")
+			end
+			box(map, center, "Floating_Sword_Blade", Vector3.new(4, 50, 8), 65, 54, 20, pal.bright, Enum.Material.Metal, false, {0, 0, 28})
+			box(map, center, "Floating_Sword_Guard", Vector3.new(22, 3, 5), 77, 47, 20, pal.warm, Enum.Material.Metal, false, {0, 0, 28})
+			box(map, center, "Floating_Sword_Handle", Vector3.new(5, 15, 5), 81, 37, 20, pal.wood, Enum.Material.Wood, false, {0, 0, 28})
+			for i = 1, 8 do orb(map, center, "Qi_Lantern", Vector3.new(3,3,3), math.sin(i * 1.7) * 56, 18 + (i % 3) * 7, math.cos(i * 1.7) * 60, pal.warm, Enum.Material.Neon, 0.15) end
+
+		elseif name == "hunter" then
+			for _, x in ipairs({-42,42}) do
+				box(map, center, "Dungeon_Gate_Pillar", Vector3.new(12, 64, 13), x, 38, -105, pal.dark, Enum.Material.Slate, true)
+				box(map, center, "Dungeon_Rune", Vector3.new(3, 48, 3), x, 38, -97, pal.main, Enum.Material.Neon, false, nil, 0.1)
+			end
+			box(map, center, "Dungeon_Gate_Lintel", Vector3.new(98, 13, 15), 0, 72, -105, pal.dark, Enum.Material.Slate, true)
+			box(map, center, "Dungeon_Portal", Vector3.new(62, 54, 2), 0, 37, -105, pal.main, Enum.Material.Neon, false, nil, 0.32)
+			box(map, center, "Dungeon_Rift_Core", Vector3.new(35, 42, 1), 0, 37, -102, pal.second, Enum.Material.Neon, false, nil, 0.3)
+			for i = 1, 6 do
+				box(map, center, "Dungeon_Rubble", Vector3.new(14, 7 + (i % 3) * 4, 12), -105 + i * 34, 10, -125 + (i % 2) * 23, pal.rock, Enum.Material.Slate, true, {0, i * 17, i * 4}, "WedgePart")
+			end
+
+		elseif name == "jungle" then
+			for _, pos in ipairs({{-112,-105},{112,-105},{-118,100},{117,103},{-72,125},{78,125}}) do addTree(map, center, pal, pos[1], pos[2], 1.05) end
+			-- Small stylized T-rex landmark, built from ordinary Roblox parts.
+			orb(map, center, "Rex_Body", Vector3.new(42, 23, 17), -8, 23, -35, pal.wood, Enum.Material.SmoothPlastic)
+			box(map, center, "Rex_Neck", Vector3.new(11, 25, 12), 13, 34, -35, pal.wood, Enum.Material.SmoothPlastic, true, {0, 0, -20})
+			orb(map, center, "Rex_Head", Vector3.new(24, 17, 18), 27, 44, -35, pal.main, Enum.Material.SmoothPlastic)
+			orb(map, center, "Rex_Eye", Vector3.new(3, 3, 3), 35, 47, -44, pal.warm, Enum.Material.Neon)
+			box(map, center, "Rex_Tail", Vector3.new(34, 7, 8), -42, 22, -35, pal.wood, Enum.Material.SmoothPlastic, true, {0, 0, 11}, "WedgePart")
+			for _, x in ipairs({-20,5}) do box(map, center, "Rex_Leg", Vector3.new(8, 18, 9), x, 14, -30, pal.wood, Enum.Material.SmoothPlastic, true) end
+			box(map, center, "Jungle_Ruin", Vector3.new(52, 8, 12), 75, 10, -35, pal.warm, Enum.Material.Slate, true)
+			for _, x in ipairs({55,95}) do box(map, center, "Ruin_Pillar", Vector3.new(8, 30, 8), x, 23, -35, pal.wood, Enum.Material.Slate, true) end
+
+		end
+
+		return map
+	end
+
+	local returnCFrame = env.GrindBrawlThemeMapReturnCFrame
+	local function isNearAnyCustomMap(position)
+		for _, center in pairs(centers) do
+			local dx, dz = position.X - center.X, position.Z - center.Z
+			if (dx * dx + dz * dz) < (470 * 470) then return true end
+		end
+		local fx, fz = position.X - FNAF_CENTER.X, position.Z - FNAF_CENTER.Z
+		if (fx * fx + fz * fz) < (2500 * 2500) then return true end
+		local bx, bz = position.X - BR_CENTER.X, position.Z - BR_CENTER.Z
+		if (bx * bx + bz * bz) < (4000 * 4000) then return true end
+		return false
+	end
+
+	-- BACKROOMS: endless local maze built 60,000 studs away. Chunks stream in around
+	-- you as you walk. Everything is client-side (nothing replicates to the server).
+	local BR = { chunk = 40, height = 12, thick = 1, render = 3, radius = 3500 }
+	local brFolder
+	local brChunks = {}
+	local brFlicker = {}
+	local brToken = 0
+	local brSavedLighting
+
+	local function brRoll(cx, cz, k)
+		local seed = math.sin(cx * 12.9898 + cz * 78.233 + k * 37.719) * 43758.5453
+		return seed - math.floor(seed)
+	end
+
+	local function brPart(parent, name, size, position, color, material)
+		local part = Instance.new("Part")
+		part.Name = name
+		part.Anchored = true
+		part.Size = size
+		part.Position = position
+		part.Color = color
+		part.Material = material
+		part.TopSurface = Enum.SurfaceType.Smooth
+		part.BottomSurface = Enum.SurfaceType.Smooth
+		part.Parent = parent
+		return part
+	end
+
+	local function brGenerateChunk(cx, cz)
+		local key = cx .. "," .. cz
+		if brChunks[key] or not (brFolder and brFolder.Parent) then return end
+		brChunks[key] = true
+		local model = Instance.new("Model")
+		model.Name = "Chunk_" .. key
+		local size, h, t = BR.chunk, BR.height, BR.thick
+		local origin = BR_CENTER + Vector3.new(cx * size, 0, cz * size)
+
+		brPart(model, "Floor", Vector3.new(size, 1, size), origin + Vector3.new(0, -0.5, 0), Color3.fromRGB(185, 170, 115), Enum.Material.Fabric)
+		brPart(model, "Ceiling", Vector3.new(size, 1, size), origin + Vector3.new(0, h + 0.5, 0), Color3.fromRGB(200, 195, 180), Enum.Material.Concrete)
+
+		local wallColor = Color3.fromRGB(215, 200, 130)
+		if brRoll(cx, cz, 1) > 0.45 then
+			brPart(model, "Wall_N", Vector3.new(size, h, t), origin + Vector3.new(0, h / 2, -size / 2), wallColor, Enum.Material.SmoothPlastic)
+		end
+		if brRoll(cx, cz, 2) > 0.45 then
+			brPart(model, "Wall_W", Vector3.new(t, h, size), origin + Vector3.new(-size / 2, h / 2, 0), wallColor, Enum.Material.SmoothPlastic)
+		end
+		if brRoll(cx, cz, 3) > 0.55 then
+			brPart(model, "Wall_CenterH", Vector3.new(size / 2, h, t), origin + Vector3.new(-size / 4, h / 2, 0), wallColor, Enum.Material.SmoothPlastic)
+		end
+		if brRoll(cx, cz, 4) > 0.55 then
+			brPart(model, "Wall_CenterV", Vector3.new(t, h, size / 2), origin + Vector3.new(0, h / 2, size / 4), wallColor, Enum.Material.SmoothPlastic)
+		end
+
+		local lamp = brPart(model, "Light", Vector3.new(4, 0.2, 2), origin + Vector3.new(0, h - 0.1, 0), Color3.fromRGB(255, 255, 230), Enum.Material.Neon)
+		lamp.CanCollide = false
+		local light = Instance.new("PointLight")
+		light.Brightness = 2
+		light.Range = 30
+		light.Color = Color3.fromRGB(255, 255, 200)
+		light.Parent = lamp
+		if brRoll(cx, cz, 5) > 0.7 then brFlicker[#brFlicker + 1] = { lamp = lamp, light = light } end
+
+		model.Parent = brFolder
+	end
+
+	local function brEnsureFolder()
+		if brFolder and brFolder.Parent then return end
+		brFolder = Instance.new("Folder")
+		brFolder.Name = "Backrooms_Infinite"
+		brFolder.Parent = mapFolder
+		brChunks = {}
+		brFlicker = {}
+	end
+
+	-- HORROR SHADER. Roblox has no custom shaders, so this is built from post-processing
+	-- effects (color grade, bloom, depth of field, atmosphere, blur) + a screen overlay
+	-- (breathing vignette) + scripted scares. Everything is removed when you leave.
+	local Lighting = game:GetService("Lighting")
+	local brFx = {}
+	local brRef = {}
+	local brGui
+	local brVignette = {}
+	local brBaseFov
+	local BR_DIM = {
+		Brightness = 0.3,
+		Ambient = Color3.fromRGB(46, 41, 30),
+		OutdoorAmbient = Color3.fromRGB(24, 22, 17),
+	}
+
+	local function brClearShader()
+		for _, inst in ipairs(brFx) do pcall(function() inst:Destroy() end) end
+		table.clear(brFx)
+		table.clear(brRef)
+		table.clear(brVignette)
+		if brGui then pcall(function() brGui:Destroy() end) brGui = nil end
+		local cam = World.CurrentCamera
+		if cam and brBaseFov then pcall(function() cam.FieldOfView = brBaseFov end) end
+		brBaseFov = nil
+	end
+
+	local function brRestoreLighting()
+		brClearShader()
+		if not brSavedLighting then return end
+		for k, v in pairs(brSavedLighting) do pcall(function() Lighting[k] = v end) end
+		brSavedLighting = nil
+	end
+
+	local function brFxInstance(className, props)
+		local inst = Instance.new(className)
+		inst.Name = "GB_BackroomsFX"
+		for k, v in pairs(props) do inst[k] = v end
+		inst.Parent = Lighting
+		brFx[#brFx + 1] = inst
+		return inst
+	end
+
+	local function brApplyLighting()
+		if not brSavedLighting then
+			brSavedLighting = {
+				Brightness = Lighting.Brightness, Ambient = Lighting.Ambient, OutdoorAmbient = Lighting.OutdoorAmbient,
+				ClockTime = Lighting.ClockTime, GlobalShadows = Lighting.GlobalShadows,
+				FogStart = Lighting.FogStart, FogEnd = Lighting.FogEnd, FogColor = Lighting.FogColor,
+				ExposureCompensation = Lighting.ExposureCompensation,
+			}
+		end
+		brClearShader()
+		Lighting.Brightness = BR_DIM.Brightness
+		Lighting.Ambient = BR_DIM.Ambient
+		Lighting.OutdoorAmbient = BR_DIM.OutdoorAmbient
+		Lighting.ClockTime = 12
+		Lighting.GlobalShadows = true
+		Lighting.FogColor = Color3.fromRGB(38, 33, 18)
+		Lighting.FogStart = 12
+		Lighting.FogEnd = 150
+		Lighting.ExposureCompensation = -0.3
+
+		-- sickly, desaturated, high-contrast grade
+		brRef.cc = brFxInstance("ColorCorrectionEffect", {
+			Saturation = -0.28, Contrast = 0.28, Brightness = -0.06,
+			TintColor = Color3.fromRGB(255, 236, 170),
+		})
+		brRef.blur = brFxInstance("BlurEffect", { Size = 0 })
+		brRef.bloom = brFxInstance("BloomEffect", { Intensity = 0.7, Size = 30, Threshold = 0.85 })
+		brRef.dof = brFxInstance("DepthOfFieldEffect", {
+			FarIntensity = 0.35, NearIntensity = 0, FocusDistance = 22, InFocusRadius = 18,
+		})
+		brFxInstance("Atmosphere", {
+			Density = 0.45, Offset = 0.2, Glare = 0, Haze = 2,
+			Color = Color3.fromRGB(120, 105, 55), Decay = Color3.fromRGB(60, 50, 25),
+		})
+
+		-- screen overlay: four gradient edges that breathe in and out, plus a flash layer
+		brGui = Instance.new("ScreenGui")
+		brGui.Name = "GB_BackroomsHorror"
+		brGui.ResetOnSpawn = false
+		brGui.IgnoreGuiInset = true
+		brGui.DisplayOrder = 50
+		brGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+		local function edge(anchor, pos, size, rot)
+			local f = Instance.new("Frame")
+			f.BackgroundColor3 = Color3.new(0, 0, 0)
+			f.BorderSizePixel = 0
+			f.Active = false
+			f.AnchorPoint = anchor
+			f.Position = pos
+			f.Size = size
+			local g = Instance.new("UIGradient")
+			g.Rotation = rot
+			g.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.05), NumberSequenceKeypoint.new(1, 1) })
+			g.Parent = f
+			f.Parent = brGui
+			brVignette[#brVignette + 1] = f
+		end
+		edge(Vector2.new(0, 0), UDim2.fromScale(0, 0), UDim2.fromScale(1, 0.24), 90)
+		edge(Vector2.new(0, 1), UDim2.fromScale(0, 1), UDim2.fromScale(1, 0.24), 270)
+		edge(Vector2.new(0, 0), UDim2.fromScale(0, 0), UDim2.fromScale(0.17, 1), 0)
+		edge(Vector2.new(1, 0), UDim2.fromScale(1, 0), UDim2.fromScale(0.17, 1), 180)
+		local flash = Instance.new("Frame")
+		flash.BackgroundColor3 = Color3.new(0, 0, 0)
+		flash.BackgroundTransparency = 1
+		flash.BorderSizePixel = 0
+		flash.Active = false
+		flash.Size = UDim2.fromScale(1, 1)
+		flash.ZIndex = 10
+		flash.Parent = brGui
+		brRef.flash = flash
+		brGui.Parent = playerGui
+
+		local cam = World.CurrentCamera
+		if cam then brBaseFov = cam.FieldOfView end
+	end
+
+	local function brSetDim(on)
+		for k, v in pairs(BR_DIM) do
+			Lighting[k] = on and v or (k == "Brightness" and 0 or Color3.new(0, 0, 0))
+		end
+	end
+
+	local function brScare(token)
+		local function alive() return token == brToken and brSavedLighting ~= nil and brRef.cc ~= nil end
+		local kind = math.random(1, 3)
+		if kind == 1 then
+			-- stuttering blackout
+			for _ = 1, math.random(3, 6) do
+				if not alive() then return end
+				brSetDim(false)
+				brRef.flash.BackgroundTransparency = 0.3
+				task.wait(0.04 + math.random() * 0.1)
+				brSetDim(true)
+				brRef.flash.BackgroundTransparency = 1
+				task.wait(0.05 + math.random() * 0.2)
+			end
+		elseif kind == 2 then
+			-- jolt: FOV kick, blur spike, red flush, like something just moved behind you
+			local cam = World.CurrentCamera
+			if cam and brBaseFov then
+				TweenService:Create(cam, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { FieldOfView = brBaseFov + 14 }):Play()
+			end
+			brRef.blur.Size = 20
+			brRef.cc.TintColor = Color3.fromRGB(255, 140, 130)
+			task.wait(0.12)
+			if not alive() then return end
+			if cam and brBaseFov then
+				TweenService:Create(cam, TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { FieldOfView = brBaseFov }):Play()
+			end
+			TweenService:Create(brRef.blur, TweenInfo.new(0.7), { Size = 0 }):Play()
+			TweenService:Create(brRef.cc, TweenInfo.new(1.2), { TintColor = Color3.fromRGB(255, 236, 170) }):Play()
+			task.wait(0.8)
+		else
+			-- the lights die for a moment, then crawl back on
+			brSetDim(false)
+			brRef.flash.BackgroundTransparency = 0.55
+			task.wait(1 + math.random() * 1.2)
+			if not alive() then return end
+			brSetDim(true)
+			TweenService:Create(brRef.flash, TweenInfo.new(0.9), { BackgroundTransparency = 1 }):Play()
+			task.wait(0.9)
+		end
+		if alive() then brSetDim(true) end
+	end
+
+	local function brShaderLoop(token)
+		local t0 = os.clock()
+		local nextScare = os.clock() + 7 + math.random() * 8
+		while token == brToken and brSavedLighting and brRef.cc and brFolder and brFolder.Parent do
+			local t = os.clock() - t0
+			local breathe = (math.sin(t * 1.3) + 1) / 2
+			for i, f in ipairs(brVignette) do
+				if i <= 2 then f.Size = UDim2.new(1, 0, 0.22 + breathe * 0.06, 0)
+				else f.Size = UDim2.new(0.15 + breathe * 0.05, 0, 1, 0) end
+			end
+			brRef.cc.Brightness = -0.06 + math.noise(t * 7, 0.5) * 0.04
+			brRef.dof.FocusDistance = 20 + math.sin(t * 0.7) * 6
+			if os.clock() >= nextScare then
+				brScare(token)
+				nextScare = os.clock() + 8 + math.random() * 14
+			end
+			task.wait(0.05)
+		end
+	end
+
+	local function brStartLoops()
+		brToken += 1
+		local token = brToken
+		task.spawn(brShaderLoop, token)
+		-- stream chunks in around the player while they are in the Backrooms
+		task.spawn(function()
+			while token == brToken and brFolder and brFolder.Parent do
+				local root = getRoot()
+				if root then
+					local dx, dz = root.Position.X - BR_CENTER.X, root.Position.Z - BR_CENTER.Z
+					if dx * dx + dz * dz < BR.radius * BR.radius then
+						local pcx = math.floor((dx + BR.chunk / 2) / BR.chunk)
+						local pcz = math.floor((dz + BR.chunk / 2) / BR.chunk)
+						for x = -BR.render, BR.render do
+							for z = -BR.render, BR.render do brGenerateChunk(pcx + x, pcz + z) end
+						end
+					end
+				end
+				task.wait(0.5)
+			end
+		end)
+		-- occasional flickering fluorescent lights
+		task.spawn(function()
+			while token == brToken and brFolder and brFolder.Parent do
+				task.wait(1 + math.random() * 3)
+				local f = brFlicker[math.random(1, math.max(1, #brFlicker))]
+				if f and f.lamp.Parent then
+					f.light.Enabled = false
+					f.lamp.Material = Enum.Material.SmoothPlastic
+					task.wait(0.1 + math.random() * 0.3)
+					f.light.Enabled = true
+					f.lamp.Material = Enum.Material.Neon
+				end
+			end
+		end)
+	end
+
+	local function teleportBackrooms()
+		brEnsureFolder()
+		for x = -2, 2 do
+			for z = -2, 2 do brGenerateChunk(x, z) end
+		end
+		local character = player.Character or player.CharacterAdded:Wait()
+		local rootPart = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart", 8)
+		if not rootPart then return false, "Character root was not found." end
+		if not returnCFrame and not isNearAnyCustomMap(rootPart.Position) then
+			returnCFrame = rootPart.CFrame
+			env.GrindBrawlThemeMapReturnCFrame = returnCFrame
+		end
+		state.mapTrip = true
+		pcall(brApplyLighting)
+		brStartLoops()
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		if humanoid then humanoid.Sit = false end
+		rootPart.AssemblyLinearVelocity = Vector3.zero
+		rootPart.AssemblyAngularVelocity = Vector3.zero
+		-- (10, -10) in the start chunk is clear of all four possible walls
+		rootPart.CFrame = CFrame.new(BR_CENTER + Vector3.new(10, 4, -10))
+		task.wait(0.12)
+		if rootPart.Parent then rootPart.AssemblyLinearVelocity = Vector3.zero end
+		return true, "🟨 Backrooms loaded with the horror shader. Use Return to go back."
+	end
+
+	-- FNAF 2 MAP: native version of the gist script. The gist deleted every Model in the
+	-- game's Workspace (that is what was wiping the map); this version never does. It loads
+	-- the map asset, places it ~10,000 studs from spawn, and adds the VHS overlay + static
+	-- sound while you are there. Respawning there sends you back to the FNAF spawn point.
+	local FNAF_MAP_ID = 134563815662337
+	local FNAF_VHS_SOUND = "rbxassetid://9071932234"
+	local FNAF_VHS_STATIC = "rbxassetid://1141151617"
+	local FNAF_DISTANCE = 10000                       -- studs from the game's spawn
+	local FNAF_MAP_OFFSET = Vector3.new(0, 10, 130)   -- map pivot, relative to the FNAF origin
+	local FNAF_SPAWN_OFFSET = Vector3.new(-11, 4, 48) -- player spawn, relative to the FNAF origin
+	local fnafModel
+	local fnafLanding
+	local fnafSpawnPos
+	local fnafActive = false
+	local fnafVhsGui
+	local fnafRespawnConn
+
+	local function spawnOrigin()
+		local spawn = World:FindFirstChildWhichIsA("SpawnLocation", true)
+		return spawn and spawn.Position or Vector3.zero
+	end
+
+	-- teleport that keeps re-applying for a moment, and reports whether it actually stuck
+	local function hardTeleport(rootPart, cf, seconds)
+		local t0 = os.clock()
+		repeat
+			rootPart = getRoot() or rootPart
+			rootPart.AssemblyLinearVelocity = Vector3.zero
+			rootPart.CFrame = cf
+			task.wait(0.1)
+		until os.clock() - t0 >= seconds
+		rootPart = getRoot() or rootPart
+		return (rootPart.Position - cf.Position).Magnitude < 300
+	end
+
+	local function stopVhs()
+		if fnafVhsGui then pcall(function() fnafVhsGui:Destroy() end) fnafVhsGui = nil end
+	end
+
+	local function startVhs()
+		stopVhs()
+		local sg = Instance.new("ScreenGui")
+		sg.Name = "GB_FNAF_VHS"
+		sg.ResetOnSpawn = false
+		sg.IgnoreGuiInset = true
+		sg.DisplayOrder = 40
+		sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+		local static = Instance.new("ImageLabel")
+		static.Size = UDim2.fromScale(1, 1)
+		static.Image = FNAF_VHS_STATIC
+		static.BackgroundTransparency = 1
+		static.ImageTransparency = 0.8
+		static.Active = false
+		static.Parent = sg
+		local rec = Instance.new("TextLabel")
+		rec.Text = "● REC"
+		rec.TextColor3 = Color3.new(1, 0, 0)
+		rec.Font = Enum.Font.Code
+		rec.TextSize = 30
+		rec.Size = UDim2.fromOffset(140, 40)
+		rec.Position = UDim2.fromScale(0.05, 0.05)
+		rec.BackgroundTransparency = 1
+		rec.Parent = sg
+		local dt = Instance.new("TextLabel")
+		dt.Size = UDim2.new(0, 200, 0, 50)
+		dt.Position = UDim2.new(0.05, 0, 0.85, 0)
+		dt.BackgroundTransparency = 1
+		dt.TextColor3 = Color3.new(1, 1, 1)
+		dt.Font = Enum.Font.Code
+		dt.TextSize = 20
+		dt.TextXAlignment = Enum.TextXAlignment.Left
+		dt.Parent = sg
+		local sound = Instance.new("Sound")
+		sound.Name = "VHSSound"
+		sound.SoundId = FNAF_VHS_SOUND
+		sound.Looped = true
+		sound.Volume = 0.5
+		sound.Parent = sg
+		sg.Parent = playerGui
+		pcall(function() sound:Play() end)
+		fnafVhsGui = sg
+		task.spawn(function()
+			while sg.Parent do
+				rec.Visible = not rec.Visible
+				dt.Text = os.date("%b %d, %Y") .. "\n" .. os.date("%H:%M:%S")
+				static.ImageRectOffset = Vector2.new(math.random(0, 100), math.random(0, 100))
+				task.wait(0.4)
+			end
+		end)
+	end
+
+	-- called when you press Return (or the GUI shuts down): VHS off, respawn hook off
+	local function fnafLeave()
+		fnafActive = false
+		stopVhs()
+		if fnafRespawnConn then pcall(fnafRespawnConn.Disconnect, fnafRespawnConn) fnafRespawnConn = nil end
+	end
+
+	local function fnafEnter()
+		fnafActive = true
+		startVhs()
+		if fnafRespawnConn then pcall(fnafRespawnConn.Disconnect, fnafRespawnConn) end
+		fnafRespawnConn = track(player.CharacterAdded:Connect(function(char)
+			if not fnafActive or not fnafSpawnPos then return end
+			local root = char:WaitForChild("HumanoidRootPart", 5)
+			task.wait(0.2)
+			if root and fnafActive then root.CFrame = CFrame.new(fnafSpawnPos + Vector3.new(0, 2, 0)) end
+		end))
+	end
+
+	local function loadAsset(id)
+		local ok, objs = pcall(function() return game:GetObjects("rbxassetid://" .. id) end)
+		if ok and objs and objs[1] then return objs[1] end
+		local ok2, model = pcall(function() return game:GetService("InsertService"):LoadAsset(id) end)
+		if ok2 and model then return model end
+		return nil, ok and "GetObjects returned nothing" or tostring(objs)
+	end
+
+	local function loadFnafMap(rootPart)
+		if fnafModel and fnafModel.Parent and fnafLanding then
+			fnafEnter()
+			return fnafLanding
+		end
+
+		local origin = spawnOrigin()
+		local fnafOrigin = Vector3.new(origin.X + FNAF_DISTANCE, 0, origin.Z)
+		local mapPos = fnafOrigin + FNAF_MAP_OFFSET
+		local spawnPos = fnafOrigin + FNAF_SPAWN_OFFSET
+		fnafSpawnPos = spawnPos
+		FNAF_CENTER = mapPos
+
+		-- 1) get out there first, on a temporary platform so nobody falls while it loads
+		local platform = Instance.new("Part")
+		platform.Name = "FNAF_Staging_Platform"
+		platform.Anchored = true
+		platform.Size = Vector3.new(80, 2, 80)
+		platform.Position = Vector3.new(spawnPos.X, spawnPos.Y - 2, spawnPos.Z)
+		platform.Transparency = 0.6
+		platform.Parent = mapFolder
+		if not hardTeleport(rootPart, CFrame.new(spawnPos + Vector3.new(0, 2, 0)), 1.2) then
+			platform:Destroy()
+			return nil, "The game moved you back after teleporting ~10k studs out (anti-teleport). Nothing was loaded."
+		end
+
+		-- 2) load the map asset (nothing in the game's Workspace is touched)
+		local map, loadErr = loadAsset(FNAF_MAP_ID)
+		if not map then
+			return nil, "Could not load the FNAF 2 map asset (" .. tostring(loadErr) .. "). It may be private/unavailable, or this executor lacks GetObjects. Press Return to go back."
+		end
+		if not map:IsA("Model") then
+			local wrapper = Instance.new("Model")
+			for _, child in ipairs(map:GetChildren()) do child.Parent = wrapper end
+			map:Destroy()
+			map = wrapper
+		end
+		map.Name = "FNAF2_Pizzaria_Map"
+		map.Parent = mapFolder
+		map:PivotTo(CFrame.new(mapPos))
+		fnafModel = map
+		task.wait(0.5)
+
+		-- 3) stand on the map's own floor at the FNAF spawn; drop the platform once it exists
+		local params = RaycastParams.new()
+		params.FilterType = Enum.RaycastFilterType.Include
+		params.FilterDescendantsInstances = { map }
+		local hit = World:Raycast(spawnPos + Vector3.new(0, 12, 0), Vector3.new(0, -60, 0), params)
+		if hit then
+			fnafLanding = hit.Position + Vector3.new(0, 4, 0)
+			platform:Destroy()
+		else
+			fnafLanding = spawnPos + Vector3.new(0, 2, 0)
+		end
+		fnafEnter()
+		return fnafLanding
+	end
+
+	local function teleport(name)
+		local center = centers[name]
+		if not center then return false, "Unknown theme map." end
+		brRestoreLighting()
+		if name ~= "fnaf" then buildMap(name) end
+		local character = player.Character or player.CharacterAdded:Wait()
+		local rootPart = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart", 8)
+		if not rootPart then return false, "Character root was not found." end
+		if not returnCFrame and not isNearAnyCustomMap(rootPart.Position) then
+			returnCFrame = rootPart.CFrame
+			env.GrindBrawlThemeMapReturnCFrame = returnCFrame
+		end
+		state.mapTrip = true
+		local dest = center + Vector3.new(0, 11, 0)
+		if name == "fnaf" then
+			local pos, err = loadFnafMap(rootPart)
+			if not pos then return false, err end
+			dest = pos
+			rootPart = character:FindFirstChild("HumanoidRootPart") or rootPart
+		end
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		if humanoid then humanoid.Sit = false end
+		rootPart.AssemblyLinearVelocity = Vector3.zero
+		rootPart.AssemblyAngularVelocity = Vector3.zero
+		rootPart.CFrame = CFrame.new(dest)
+		task.wait(0.12)
+		if rootPart.Parent then
+			rootPart.AssemblyLinearVelocity = Vector3.zero
+			rootPart.AssemblyAngularVelocity = Vector3.zero
+		end
+		return true, (THEMES[name].icon or "🗺️") .. " " .. THEMES[name].label .. " Map loaded. Teleported to the map."
+	end
+
+	local function returnToSavedSpot()
+		if not returnCFrame then return false, "No return spot saved yet. Visit a theme map first." end
+		local character = player.Character or player.CharacterAdded:Wait()
+		local rootPart = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart", 8)
+		if not rootPart then return false, "Character root was not found." end
+		brRestoreLighting()
+		fnafLeave()
+		state.mapTrip = false
+		local saved = returnCFrame
+		returnCFrame = nil
+		env.GrindBrawlThemeMapReturnCFrame = nil
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		if humanoid then humanoid.Sit = false end
+		rootPart.AssemblyLinearVelocity = Vector3.zero
+		rootPart.CFrame = saved
+		return true, "Returned to the position saved before entering a theme map."
+	end
+
+	return {
+		Teleport = teleport, Return = returnToSavedSpot, Build = buildMap,
+		Backrooms = teleportBackrooms,
+		Stop = function() brToken += 1; brRestoreLighting(); fnafLeave(); state.mapTrip = false end,
+	}
+end)()
+
+sectionLabel("🗺️ REAL THEME MAPS")
+addLabel("Build a walkable map matching each theme, then teleport there. Maps are created on demand and stay cached in Workspace for this session.", 48)
+
+local mapGrid = create("Frame", {
+	LayoutOrder = nextOrder(),
+	Size = UDim2.new(1, 0, 0, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
+	BackgroundTransparency = 1,
+}, parentFrame)
+create("UIGridLayout", {
+	CellSize = UDim2.new(0.5, -5, 0, 48),
+	CellPadding = UDim2.fromOffset(9, 9),
+	SortOrder = Enum.SortOrder.LayoutOrder,
+}, mapGrid)
+
+local mapStatus = create("TextLabel", {
+	LayoutOrder = nextOrder(),
+	Size = UDim2.new(1, 0, 0, 34),
+	BackgroundTransparency = 1,
+	Text = "No theme map loaded yet.",
+	TextColor3 = INK,
+	TextSize = 12,
+	Font = FONT_BODY,
+	TextWrapped = true,
+	TextXAlignment = Enum.TextXAlignment.Left,
+}, parentFrame)
+
+for i, name in ipairs(Scenes.order) do
+	local def = THEMES[name]
+	local chip = create("TextButton", {
+		LayoutOrder = i,
+		BackgroundColor3 = def.cream_b or def.bg,
+		Text = (def.icon or "🗺️") .. "  " .. def.label .. "\nBUILD + TELEPORT",
+		TextColor3 = (name == "light" and INK) or (def.cream_t or CREAM),
+		TextSize = 11,
+		Font = FONT_TITLE,
+		TextWrapped = true,
+		AutoButtonColor = false,
+	}, mapGrid)
+	create("UICorner", { CornerRadius = UDim.new(0, 12) }, chip)
+	create("UIStroke", { Color = def.neonA or def.pink or PINK, Thickness = 2 }, chip)
+	Skin.decorate(chip, "raised", UDim.new(0, 12))
+	Skin.swatch(chip, def.bgTop or def.bg, def.neonA or def.pink or PINK, def.neonB or def.teal or TEAL)
+	chip.Activated:Connect(function()
+		mapStatus.Text = "Building " .. def.label .. " and moving you there..."
+		pcall(function() setTheme(name, true) end)
+		task.spawn(function()
+			local ok, success, message = pcall(ThemeMapSystem.Teleport, name)
+			if not ok then
+				mapStatus.Text = "Map error: " .. tostring(success)
+			elseif success then
+				mapStatus.Text = message or (def.label .. " Map loaded.")
+			else
+				mapStatus.Text = message or "Could not teleport to that map."
+			end
+		end)
+	end)
+end
+
+do
+local backroomsButton = create("TextButton", {
+	LayoutOrder = nextOrder(),
+	Size = UDim2.new(1, 0, 0, 48),
+	BackgroundColor3 = Color3.fromRGB(185, 170, 115),
+	Text = "🟨  BACKROOMS\nBUILD + TELEPORT (far away)",
+	TextColor3 = INK,
+	TextSize = 11,
+	Font = FONT_TITLE,
+	TextWrapped = true,
+	AutoButtonColor = false,
+}, parentFrame)
+create("UICorner", { CornerRadius = UDim.new(0, 12) }, backroomsButton)
+create("UIStroke", { Color = Color3.fromRGB(215, 200, 130), Thickness = 2 }, backroomsButton)
+Skin.decorate(backroomsButton, "raised", UDim.new(0, 12))
+backroomsButton.Activated:Connect(function()
+	mapStatus.Text = "Building the Backrooms and moving you there..."
+	task.spawn(function()
+		local ok, success, message = pcall(ThemeMapSystem.Backrooms)
+		if not ok then
+			mapStatus.Text = "Backrooms error: " .. tostring(success)
+		else
+			mapStatus.Text = message or (success and "Backrooms loaded." or "Could not load the Backrooms.")
+		end
+	end)
+end)
+end
+
+local mapReturnButton = create("TextButton", {
+	LayoutOrder = nextOrder(),
+	Size = UDim2.new(1, 0, 0, 40),
+	BackgroundColor3 = INK,
+	Text = "↩  RETURN TO SAVED SPOT",
+	TextColor3 = CREAM,
+	TextSize = 13,
+	Font = FONT_TITLE,
+	AutoButtonColor = false,
+}, parentFrame)
+create("UICorner", { CornerRadius = UDim.new(0, 12) }, mapReturnButton)
+create("UIStroke", { Color = TEAL, Thickness = 2 }, mapReturnButton)
+Skin.decorate(mapReturnButton, "raised", UDim.new(0, 12))
+mapReturnButton.Activated:Connect(function()
+	local ok, success, message = pcall(ThemeMapSystem.Return)
+	if not ok then
+		mapStatus.Text = "Return error: " .. tostring(success)
+	elseif success then
+		mapStatus.Text = message or "Returned to saved spot."
+	else
+		mapStatus.Text = message or "No saved return spot."
+	end
+end)
+
+------------------------------------------------------------------------
 -- BRAWL TAB: status pill
 ------------------------------------------------------------------------
 parentFrame = colBrawl
@@ -4337,6 +5264,10 @@ local function seatWatchdog()
 	if os.clock() - lastSeatCheck < 1 then return end
 	lastSeatCheck = os.clock()
 	local hum, hrp = getHumanoid(), getRoot()
+	if state.mapTrip then -- away on a theme map: don't drag the character back to the seat
+		unseatedSince = nil
+		return
+	end
 	if not (hum and hrp) or hum.Health <= 0 then
 		unseatedSince = nil
 		return
@@ -5473,6 +6404,7 @@ track(UserInputService.InputBegan:Connect(function(input, processed)
 end))
 
 local function shutdown()
+	pcall(ThemeMapSystem.Stop)
 	state.fastRep = false
 	state.autoBrawl = false
 	state.autoEgg = false
