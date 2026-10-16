@@ -772,13 +772,25 @@ do
 		return p
 	end
 
-	-- 3D particles
+	-- PART A — quality scaling, richer particles, camera hooks
+	------------------------------------------------------------------------
+	local UIS = game:GetService("UserInputService")
+	local V2 = Vector2.new
+	local QUALITY = (UIS.TouchEnabled and not UIS.KeyboardEnabled) and 0.6 or 1
+	local function qn(n) return math.max(1, math.floor(n * QUALITY + 0.5)) end
+	local PCAP = math.floor(260 * QUALITY + 0.5)
+	local camFn, shakeAmt = nil, 0
+	local function shake(a) shakeAmt = math.max(shakeAmt, a) end
+	
+	-- 3D particles.  Fields: pos vel acc size col mat life grow shrink fadeAt spin
+	--                        col2 (colour over life)  drag  stretch (streak along velocity)
 	local function emit(o)
-		if #P3 > 130 then return end
+		if #P3 >= PCAP then return end
 		local s = o.size or 0.2
 		local sz = typeof(s) == "Vector3" and s or V3(s, s, s)
 		o.base, o.age, o.life = sz, 0, o.life or 1
-		o.part = ellipsoid(world, sz, o.col or C(255, 255, 255), CF(o.pos), o.mat or NEON)
+		o.col0 = o.col or C(255, 255, 255)
+		o.part = ellipsoid(world, sz, o.col0, CF(o.pos), o.mat or NEON)
 		P3[#P3 + 1] = o
 	end
 	local function stepParticles(dt)
@@ -790,17 +802,30 @@ do
 				o.part:Destroy()
 				table.remove(P3, i)
 			else
+				if o.drag then o.vel *= math.max(0, 1 - o.drag * dt) end
 				o.pos += o.vel * dt
 				if o.acc then o.vel += o.acc * dt end
-				local cf = CF(o.pos)
+				local cf
+				if o.stretch and o.vel.Magnitude > 0.01 then
+					cf = CFrame.lookAt(o.pos, o.pos + o.vel)
+				else
+					cf = CF(o.pos)
+				end
 				if o.spin then cf = cf * ANG(o.spin.X * o.age, o.spin.Y * o.age, o.spin.Z * o.age) end
 				o.part.CFrame = cf
 				local fa = o.fadeAt or 0.35
 				o.part.Transparency = math.clamp((f - fa) / (1 - fa), 0, 1)
-				if o.grow then o.part.Size = o.base * (1 + o.grow * f) end
+				local sc = math.max((1 + (o.grow or 0) * f) * (1 - (o.shrink or 0) * f), 0.01)
+				if o.stretch then
+					o.part.Size = V3(o.base.X * sc, o.base.Y * sc, o.base.Z * sc * o.stretch)
+				elseif o.grow or o.shrink then
+					o.part.Size = o.base * sc
+				end
+				if o.col2 then o.part.Color = o.col0:Lerp(o.col2, f) end
 			end
 		end
 	end
+
 
 	-- run fn every `interval` seconds while this scene is still the active one
 	local function every(tk, interval, fn, waitFirst)
@@ -820,17 +845,29 @@ do
 		TweenService:Create(obj, TweenInfo.new(t, style or Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), goal):Play()
 	end
 
-	-- one shared render loop (30 fps) for everything in the viewport
+	-- PART B — shared render loop (camera override + screen shake)
+	------------------------------------------------------------------------
 	do
 		local acc = 0
 		track(RunService.Heartbeat:Connect(function(dt)
 			if not (scene.Visible and gui.Enabled) then return end
 			acc += dt
 			if acc < 1 / 30 then return end
-			local step = acc
+			local step = math.min(acc, 0.1)
 			acc = 0
 			local t = os.clock()
-			cam.CFrame = CFrame.lookAt(V3(sin(t * 0.35) * 0.7, 1.4 + sin(t * 0.27) * 0.3, 22), V3(0, 0, 0))
+			if camFn then
+				camFn(t, step)
+			else
+				cam.CFrame = CFrame.lookAt(V3(sin(t * 0.35) * 0.7, 1.4 + sin(t * 0.27) * 0.3, 22), V3(0, 0, 0))
+			end
+			if shakeAmt > 0.003 then
+				local s = shakeAmt
+				cam.CFrame = cam.CFrame * CF(rng:NextNumber(-s, s), rng:NextNumber(-s, s), 0)
+				shakeAmt *= 0.84
+			else
+				shakeAmt = 0
+			end
 			stepParticles(step)
 			for i = #anims, 1, -1 do
 				local ok, keep = pcall(anims[i], step, t)
@@ -1236,60 +1273,392 @@ do
 	----------------------------------------------------------------
 	-- scenes
 	----------------------------------------------------------------
+	-- PART C — shared VFX helpers (paste above `local BUILD = {}`)
+	------------------------------------------------------------------------
+	
+	-- soft round glow made of stacked circles (2D, size is a fraction of the window height)
+	local function softBlob(parent, cx, cy, frac, col, tr, steps)
+		steps = steps or 5
+		local holder = mk("Frame", {
+			AnchorPoint = V2(0.5, 0.5), Position = UDim2.fromScale(cx, cy), Size = UDim2.fromScale(frac, frac),
+			SizeConstraint = Enum.SizeConstraint.RelativeYY, BackgroundTransparency = 1, BorderSizePixel = 0,
+		}, parent)
+		for i = 1, steps do
+			local k = i / steps
+			local c = mk("Frame", {
+				AnchorPoint = V2(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
+				Size = UDim2.fromScale(1.02 - k * 0.8, 1.02 - k * 0.8),
+				BackgroundColor3 = col, BackgroundTransparency = 1 - (1 - tr) / steps * 1.6, BorderSizePixel = 0,
+			}, holder)
+			mk("UICorner", { CornerRadius = UDim.new(1, 0) }, c)
+		end
+		return holder
+	end
+	
+	-- twinkling, slowly drifting star layer (one animation for all stars)
+	local function starfield(n, cols, zMin, zMax, hwv, drift)
+		local list = {}
+		for _ = 1, qn(n) do
+			local z = rng:NextNumber(zMin, zMax)
+			local s = rng:NextNumber(0.07, 0.2)
+			list[#list + 1] = {
+				p = ellipsoid(world, V3(s, s, s), pick(cols), CF(rng:NextNumber(-hwv * 2, hwv * 2), rng:NextNumber(-11, 11), z), NEON),
+				ph = rng:NextNumber(0, 6), sp = (z - zMin + 2) * (drift or 0.03),
+			}
+		end
+		anim(function(dt, t)
+			for _, s in ipairs(list) do
+				local p = s.p.Position
+				local nx = p.X - dt * s.sp
+				if nx < -hwv * 2 then nx = hwv * 2 end
+				s.p.Position = V3(nx, p.Y, p.Z)
+				s.p.Transparency = 0.15 + 0.5 * (sin(t * 2 + s.ph) + 1) / 2
+			end
+		end)
+	end
+	
+	-- 4-point glint
+	local function sparkle(pos, col, size, life)
+		local a = box(world, V3(size, size * 0.12, size * 0.12), col, CF(pos), NEON)
+		local b = box(world, V3(size * 0.12, size, size * 0.12), col, CF(pos), NEON)
+		local t0 = os.clock()
+		anim(function(_, t)
+			local f = (t - t0) / life
+			if f >= 1 then a:Destroy() b:Destroy() return false end
+			local k = math.max(sin(f * pi), 0.001)
+			a.Size = V3(size * k, size * 0.12, size * 0.12)
+			b.Size = V3(size * 0.12, size * k, size * 0.12)
+			local cf = CF(pos) * ANG(0, 0, f * 1.4)
+			a.CFrame, b.CFrame = cf, cf
+		end)
+	end
+	
+	-- expanding ring.  plane: "xy" (faces the camera) or "xz" (lies on the ground)
+	local function shock(pos, col, r1, life, plane, n)
+		n = qn(n or 18)
+		local segs = {}
+		for i = 1, n do segs[i] = box(world, V3(0.1, 0.06, 0.06), col, CF(pos), NEON) end
+		local t0 = os.clock()
+		anim(function(_, t)
+			local a = (t - t0) / life
+			if a >= 1 then
+				for _, s in ipairs(segs) do s:Destroy() end
+				return false
+			end
+			local r = r1 * (1 - (1 - a) ^ 3)
+			local w = 0.16 * (1 - a) + 0.02
+			for i, s in ipairs(segs) do
+				local ang = i / n * 2 * pi
+				s.Size = V3(2 * pi * r / n * 1.15 + 0.02, w, w)
+				if plane == "xz" then
+					s.CFrame = CF(pos + V3(cos(ang) * r, 0, sin(ang) * r)) * ANG(0, -(ang + pi / 2), 0)
+				else
+					s.CFrame = CF(pos + V3(cos(ang) * r, sin(ang) * r, 0)) * ANG(0, 0, ang + pi / 2)
+				end
+				s.Transparency = a * a
+			end
+		end)
+	end
+	
+	-- spherical burst of particles
+	local function burst(pos, n, o)
+		o = o or {}
+		local cols = o.cols or { C(255, 255, 255) }
+		for _ = 1, qn(n) do
+			local d = V3(rng:NextNumber(-1, 1), rng:NextNumber(-1, 1), rng:NextNumber(-1, 1))
+			if d.Magnitude < 0.05 then d = V3(0, 1, 0) end
+			emit({
+				pos = pos, vel = d.Unit * rng:NextNumber(o.min or 2, o.max or 6), acc = o.acc, drag = o.drag,
+				size = rng:NextNumber(o.s0 or 0.1, o.s1 or 0.25), col = pick(cols), col2 = o.col2,
+				life = rng:NextNumber(o.l0 or 0.5, o.l1 or 1), grow = o.grow, shrink = o.shrink,
+				stretch = o.stretch, mat = o.mat, fadeAt = o.fadeAt,
+			})
+		end
+	end
+	
+	-- full-window colour flash (2D, above the 3D view)
+	local function flashScreen(col, tr, dur)
+		local f = mk("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = col, BackgroundTransparency = tr, BorderSizePixel = 0, ZIndex = 4 }, overlay)
+		TweenService:Create(f, TweenInfo.new(dur), { BackgroundTransparency = 1 }):Play()
+		task.delay(dur + 0.05, function() if f.Parent then f:Destroy() end end)
+	end
+	
+	-- dragon flyover with pulsed breath, roar shockwave + screen shake, and a particle trail
+	local function dragonPass(pal, dir, y, z, dur, o)
+		local d = dragon3d(pal)
+		local hwx = extent() + 5
+		local t0 = os.clock()
+		local roared = false
+		anim(function(_, t)
+			local a = (t - t0) / dur
+			if a >= 1 then
+				d.model:Destroy()
+				return false
+			end
+			local x = dir * (-hwx + 2 * hwx * a)
+			local yaw = dir == 1 and -0.5 or pi + 0.5
+			local root = CF(x, y + sin(a * pi * 3) * 0.5, z) * ANG(0, yaw, 0) * ANG(sin(t * 2) * 0.08, 0, cos(a * pi * 3) * 0.1)
+			d.update(root, t, 9)
+			local mp = (root * CF(3.5 * d.K, 0.8 * d.K, 0)).Position
+			local fwd = root.RightVector
+			if (a > 0.28 and a < 0.46) or (a > 0.58 and a < 0.7) then
+				for _ = 1, 3 do
+					emit({
+						pos = mp, vel = fwd * rng:NextNumber(6, 10) + V3(rng:NextNumber(-1, 1), rng:NextNumber(-1.2, 0.8), rng:NextNumber(-1, 1)),
+						size = rng:NextNumber(0.22, 0.5), col = pick(o.breath), col2 = o.breath2, life = 0.8, grow = 2.2, shrink = 0.2,
+					})
+				end
+			end
+			if a > 0.26 and not roared then
+				roared = true
+				shock(mp, o.ring, 3.2, 0.7, "xy")
+				shake(0.14)
+			end
+			local tail = (root * CF(-3.7, 0, 0)).Position
+			emit({ pos = tail, vel = V3(rng:NextNumber(-0.3, 0.3), rng:NextNumber(-0.3, 0.5), 0), size = rng:NextNumber(0.1, 0.22), col = pick(o.trail), life = 1.0, grow = 0.5, shrink = 0.5 })
+		end)
+	end
+
 	local BUILD = {}
 
 	BUILD.lava = function(tk)
 		light(C(110, 56, 48), C(255, 170, 110), V3(-0.5, -0.7, -0.5))
+		local hw = extent()
+		local FIRE = { C(255, 140, 30), C(255, 222, 90), C(255, 80, 20) }
+	
+		-- 2D: floor glow, hot sky, heat shimmer
 		local glow = mk("Frame", {
-			AnchorPoint = Vector2.new(0, 1), Position = UDim2.fromScale(0, 1), Size = UDim2.new(1, 0, 0, 110),
+			AnchorPoint = V2(0, 1), Position = UDim2.fromScale(0, 1), Size = UDim2.new(1, 0, 0, 130),
 			BackgroundColor3 = C(255, 120, 30), BorderSizePixel = 0,
 		}, layer)
-		mk("UIGradient", { Rotation = 90, Transparency = NumberSequence.new(1, 0.25) }, glow)
+		mk("UIGradient", { Rotation = 90, Transparency = NumberSequence.new(1, 0.2) }, glow)
 		loopTween(glow, 1.4, { BackgroundColor3 = C(255, 196, 60) })
-
-		local hw = extent()
-		-- magma floor
-		box(world, V3(80, 0.4, 40), C(255, 110, 30), CF(0, -7.2, -6), NEON)
-		-- stepped volcano with glowing crater
+		local sky = softBlob(layer, 0.72, 0.28, 0.9, C(255, 90, 30), 0.9)
+		loopTween(sky, 3, { Position = UDim2.fromScale(0.68, 0.32) })
+		for i = 1, 3 do
+			local sh = mk("Frame", {
+				AnchorPoint = V2(0, 1), Position = UDim2.new(0, 0, 1, -30 - i * 38), Size = UDim2.new(1, 0, 0, 26),
+				BackgroundColor3 = C(255, 150, 70), BackgroundTransparency = 0.93, BorderSizePixel = 0,
+			}, layer)
+			mk("UIGradient", { Transparency = NumberSequence.new({ kp(0, 1), kp(0.5, 0), kp(1, 1) }) }, sh)
+			loopTween(sh, 1.6 + i * 0.5, { Position = UDim2.new(0, 0, 1, -44 - i * 38), BackgroundTransparency = 0.97 })
+		end
+	
+		-- magma lake + drifting crust plates
+		box(world, V3(90, 0.4, 44), C(255, 110, 30), CF(0, -7.2, -6), NEON)
+		local plates = {}
+		for i = 1, qn(9) do
+			plates[i] = {
+				p = box(world, V3(rng:NextNumber(2.2, 4.4), 0.22, rng:NextNumber(1.2, 2.6)), C(40, 22, 20), CF(), SLATE),
+				x0 = rng:NextNumber(-hw * 1.4, hw * 1.4), z = rng:NextNumber(-9, 1),
+				sp = rng:NextNumber(0.08, 0.22) * (i % 2 == 0 and 1 or -1), tilt = rng:NextNumber(-0.1, 0.1),
+			}
+		end
+		anim(function(_, t)
+			local span = hw * 3
+			for _, pl in ipairs(plates) do
+				local x = ((pl.x0 + t * pl.sp + span / 2) % span) - span / 2
+				pl.p.CFrame = CF(x, -6.98 + sin(t * 0.9 + pl.x0) * 0.03, pl.z) * ANG(0, pl.tilt, 0)
+			end
+		end)
+	
+		-- stepped volcano, glowing flows, crater
 		local vx = hw * 0.45
+		local tiers = {}
 		for i = 1, 7 do
 			local f = (i - 1) / 6
 			local d = 12 - f * 9.6
 			cyl(world, V3(1.1, d, d), C(58, 26, 22):Lerp(C(120, 50, 30), f), CF(vx, -8 + i * 1.05, -10) * ANG(0, 0, rad(90)), SLATE)
+			tiers[i] = { y = -8 + i * 1.05, r = d / 2 }
 		end
-		local crater = ellipsoid(world, V3(2.6, 0.8, 2.6), C(255, 150, 40), CF(vx, -0.3, -10), NEON)
-		anim(function(_, t) crater.Transparency = 0.1 + 0.25 * (sin(t * 3) + 1) / 2 end)
-		-- floating rocks
+		local cp = V3(vx, -0.3, -10)
+		local crater = ellipsoid(world, V3(2.6, 0.8, 2.6), C(255, 150, 40), CF(cp), NEON)
+		local boost = 0
+		anim(function(dt, t)
+			boost = math.max(0, boost - dt * 0.5)
+			crater.Transparency = math.clamp(0.1 + 0.25 * (sin(t * 3) + 1) / 2 - boost * 0.3, 0, 1)
+			crater.Size = V3(2.6 + boost * 1.2, 0.8, 2.6 + boost * 1.2)
+		end)
+		local flow = {}
+		for _, u in ipairs({ -0.72, 0.12, 0.7 }) do
+			for i = 1, 7 do
+				local tr = tiers[i]
+				local x = vx + tr.r * u
+				local z = -10 + tr.r * math.sqrt(1 - u * u) + 0.05
+				flow[#flow + 1] = { p = box(world, V3(0.5, 1.0, 0.35), C(255, 120, 30), CF(x, tr.y, z) * ANG(0, 0, rad(-u * 24)), NEON), i = i, u = u }
+			end
+		end
+		anim(function(_, t)
+			for _, s in ipairs(flow) do
+				s.p.Transparency = 0.12 + 0.55 * (0.5 + 0.5 * sin(t * 3.2 - s.i * 0.9 + s.u * 4))
+			end
+		end)
+	
+		-- floating rocks with glowing cracks
 		for _ = 1, 7 do
 			local s = rng:NextNumber(0.5, 1.3)
 			local p = V3(rng:NextNumber(-hw, hw), rng:NextNumber(-3, 6), rng:NextNumber(-8, -1))
 			local r = box(world, V3(s, s * rng:NextNumber(0.6, 1), s), C(52, 28, 26):Lerp(C(110, 50, 34), rng:NextNumber()), CF(p), SLATE)
+			local crack = ellipsoid(world, V3(s * 0.55, s * 0.08, s * 0.08), C(255, 140, 40), CF(p), NEON)
 			local ph, rx, ry = rng:NextNumber(0, 6), rng:NextNumber(-1, 1), rng:NextNumber(-1, 1)
-			anim(function(_, t) r.CFrame = CF(p + V3(0, sin(t * 0.8 + ph) * 0.35, 0)) * ANG(t * rx, t * ry, ph) end)
+			anim(function(_, t)
+				r.CFrame = CF(p + V3(0, sin(t * 0.8 + ph) * 0.35, 0)) * ANG(t * rx, t * ry, ph)
+				crack.CFrame = r.CFrame * CF(0, s * 0.3, s * 0.52)
+				crack.Transparency = 0.2 + 0.4 * (sin(t * 2.5 + ph) + 1) / 2
+			end)
 		end
-		-- embers + magma bubbles
+	
+		-- eruption set piece
+		local function erupt()
+			boost = 1.6
+			flashScreen(C(255, 150, 50), 0.72, 0.9)
+			shake(0.22)
+			shock(cp + V3(0, 0.3, 0), C(255, 190, 80), 5.5, 0.9, "xy", 26)
+			shock(cp + V3(0, -0.2, 0), C(255, 120, 40), 7, 1.2, "xz", 26)
+			for _ = 1, qn(7) do
+				local pos = cp + V3(rng:NextNumber(-0.6, 0.6), 0.5, rng:NextNumber(-0.4, 0.8))
+				local vel = V3(rng:NextNumber(-1, 1) * 5.5, rng:NextNumber(10, 15), rng:NextNumber(-1, 3))
+				local rock = ellipsoid(world, V3(0.5, 0.5, 0.5) * rng:NextNumber(0.7, 1.3), C(255, 140, 40), CF(pos), NEON)
+				local t0 = os.clock()
+				anim(function(dt, t)
+					vel += V3(0, -11, 0) * dt
+					pos += vel * dt
+					rock.CFrame = CF(pos)
+					if rng:NextNumber() < 0.45 then
+						emit({
+							pos = pos, vel = V3(rng:NextNumber(-0.4, 0.4), rng:NextNumber(-0.2, 0.6), 0), size = rng:NextNumber(0.12, 0.26),
+							col = pick(FIRE), col2 = C(70, 20, 10), life = 0.6, shrink = 0.6, fadeAt = 0.4,
+						})
+					end
+					if pos.Y < -6.8 or t - t0 > 4 then
+						rock:Destroy()
+						burst(V3(pos.X, -6.9, pos.Z), 10, { cols = FIRE, min = 2, max = 6, acc = V3(0, -10, 0), s0 = 0.1, s1 = 0.22, l0 = 0.4, l1 = 0.8 })
+						return false
+					end
+				end)
+			end
+			local plumeEnd = os.clock() + 2.4
+			anim(function(_, t)
+				if t > plumeEnd then return false end
+				if rng:NextNumber() < 0.6 then
+					emit({
+						pos = cp + V3(rng:NextNumber(-0.8, 0.8), 0.4, rng:NextNumber(-0.5, 0.5)), vel = V3(rng:NextNumber(-0.8, 0.2), rng:NextNumber(3.2, 5), 0),
+						size = rng:NextNumber(0.6, 1.1), col = C(90, 56, 48), col2 = C(24, 22, 24), mat = SMOOTH, life = 3.2, grow = 2.6, fadeAt = 0.55,
+					})
+				end
+			end)
+			for k = 1, 2 do
+				task.delay(0.5 + k * 0.55, function()
+					if token ~= tk then return end
+					local top = cp + V3(rng:NextNumber(-1.5, 1.5), rng:NextNumber(4.5, 6), 0.5)
+					bolt(top, top + V3(rng:NextNumber(-2, 2), -rng:NextNumber(2.5, 3.5), 0), C(235, 210, 255), 0.24, 6, 0.5, 0.1)
+				end)
+			end
+		end
+		task.delay(2.2, function() if token == tk then erupt() end end)
+		every(tk, function() return rng:NextNumber(8, 13) end, erupt, true)
+	
+		-- floor geysers
+		local function geyser()
+			local x, z = rng:NextNumber(-hw * 0.9, hw * 0.3), rng:NextNumber(-6, 0)
+			local endT = os.clock() + 0.7
+			anim(function(_, t)
+				if t > endT then
+					burst(V3(x, -3, z), 8, { cols = FIRE, min = 1, max = 4, acc = V3(0, -8, 0), l0 = 0.5, l1 = 1 })
+					return false
+				end
+				emit({
+					pos = V3(x + rng:NextNumber(-0.15, 0.15), -6.9, z), vel = V3(rng:NextNumber(-0.7, 0.7), rng:NextNumber(7, 10), 0), acc = V3(0, -9, 0),
+					size = rng:NextNumber(0.14, 0.3), col = pick(FIRE), life = 1.1, fadeAt = 0.5,
+				})
+			end)
+		end
+		every(tk, function() return rng:NextNumber(3.5, 6.5) end, geyser, true)
+	
+		-- ambient particles: embers, streaking sparks, ash flakes, smoke
 		every(tk, 0.12, function()
-			emit({ pos = V3(rng:NextNumber(-hw, hw), -7, rng:NextNumber(-8, 0)), vel = V3(rng:NextNumber(-0.5, 0.5), rng:NextNumber(1.5, 3.2), 0),
-				size = rng:NextNumber(0.08, 0.22), col = pick({ C(255, 150, 40), C(255, 222, 100) }), life = rng:NextNumber(3, 5), fadeAt = 0.6 })
+			emit({
+				pos = V3(rng:NextNumber(-hw, hw), -7, rng:NextNumber(-8, 0)), vel = V3(rng:NextNumber(-0.5, 0.5), rng:NextNumber(1.5, 3.2), 0),
+				size = rng:NextNumber(0.08, 0.22), col = pick({ C(255, 150, 40), C(255, 222, 100) }), col2 = C(120, 30, 14),
+				life = rng:NextNumber(3, 5), shrink = 0.5, fadeAt = 0.6,
+			})
 		end)
-		task.delay(1, function() if token == tk then flyDragon(LAVA_PAL, 1, 3.5, -3, 6.5, { C(255, 140, 30), C(255, 222, 90), C(255, 80, 20) }) end end)
+		every(tk, 0.25, function()
+			emit({
+				pos = V3(rng:NextNumber(-hw, hw), -7, rng:NextNumber(-8, 0)), vel = V3(rng:NextNumber(-1.5, 1.5), rng:NextNumber(3, 6), 0), acc = V3(0, -1.5, 0),
+				size = 0.05, stretch = 5, col = C(255, 230, 140), life = 1.2, fadeAt = 0.5,
+			})
+		end)
+		every(tk, 0.35, function()
+			emit({
+				pos = V3(rng:NextNumber(-hw, hw), 9, rng:NextNumber(-8, 2)), vel = V3(rng:NextNumber(-1.2, 0.2), -rng:NextNumber(0.6, 1.2), 0),
+				size = V3(0.16, 0.03, 0.1), col = C(70, 60, 60), mat = SMOOTH, life = 9, fadeAt = 0.9,
+				spin = V3(rng:NextNumber(-3, 3), rng:NextNumber(-3, 3), rng:NextNumber(-3, 3)),
+			})
+		end)
+		every(tk, 0.4, function()
+			emit({
+				pos = cp + V3(rng:NextNumber(-0.6, 0.6), 0.3, 0), vel = V3(rng:NextNumber(-1, -0.2), rng:NextNumber(1.2, 2), 0),
+				size = 0.7, col = C(60, 40, 36), col2 = C(20, 18, 20), mat = SMOOTH, life = 4.5, grow = 3, fadeAt = 0.4,
+			})
+		end)
+	
+		-- dragon
+		local DO = { breath = FIRE, breath2 = C(110, 20, 10), ring = C(255, 170, 60), trail = { C(255, 150, 40), C(255, 222, 100) } }
+		task.delay(1.2, function() if token == tk then dragonPass(LAVA_PAL, 1, 3.5, -3, 6.5, DO) end end)
 		every(tk, function() return rng:NextNumber(8, 12) end, function()
-			flyDragon(LAVA_PAL, 1, rng:NextNumber(2.5, 5), rng:NextNumber(-4, -2), 6.5, { C(255, 140, 30), C(255, 222, 90), C(255, 80, 20) })
+			dragonPass(LAVA_PAL, 1, rng:NextNumber(2.5, 5), rng:NextNumber(-4, -2), 6.5, DO)
 		end, true)
 	end
+	
+	----------------------------------------------------------------
+	-- ICE: aurora curtains, moon, glittering crystals, shattering shards, blizzard gusts,
+	--      frost fog, frost-breathing dragon
+	----------------------------------------------------------------
 
 	BUILD.ice = function(tk)
 		light(C(120, 150, 185), C(225, 242, 255), V3(-0.4, -0.8, -0.6))
-		for i, col in ipairs({ C(80, 255, 200), C(120, 160, 255) }) do
+		local hw, hh = extent()
+		local FROST = { C(190, 240, 255), C(255, 255, 255), C(120, 200, 255) }
+		local wind, gusting = 0, 0
+	
+		-- aurora (2D)
+		local AUR = { C(80, 255, 190), C(110, 170, 255), C(190, 130, 255), C(70, 230, 255) }
+		for i, col in ipairs(AUR) do
 			local band = mk("Frame", {
-				Position = UDim2.new(-0.2, 0, 0, 10 + i * 30), Size = UDim2.new(1.4, 0, 0, 46),
-				BackgroundColor3 = col, BackgroundTransparency = 0.6, BorderSizePixel = 0,
+				Position = UDim2.new(-0.2, 0, 0, -10 + i * 26), Size = UDim2.new(1.4, 0, 0, 40 + i * 10),
+				BackgroundColor3 = col, BackgroundTransparency = 0.62, BorderSizePixel = 0, Rotation = i % 2 == 0 and 3 or -3,
 			}, layer)
-			mk("UIGradient", { Transparency = NumberSequence.new({ kp(0, 1), kp(0.5, 0), kp(1, 1) }) }, band)
-			loopTween(band, 4 + i * 2, { Position = UDim2.new(-0.4, 0, 0, 10 + i * 30), BackgroundTransparency = 0.8 })
+			mk("UIGradient", { Transparency = NumberSequence.new({ kp(0, 1), kp(0.25, 0.1), kp(0.55, 0.5), kp(0.8, 0), kp(1, 1) }) }, band)
+			loopTween(band, 5 + i * 1.7, {
+				Position = UDim2.new(-0.45 + i * 0.05, 0, 0, 6 + i * 26), BackgroundTransparency = 0.82, Rotation = i % 2 == 0 and -4 or 4,
+			})
+			TweenService:Create(band, TweenInfo.new(7 + i, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
+				BackgroundColor3 = AUR[(i % #AUR) + 1],
+			}):Play()
 		end
-		local hw = extent()
-		-- crystal clusters with glowing cores
+	
+		-- stars + big pale moon with halos
+		starfield(30, { C(255, 255, 255), C(190, 225, 255) }, -26, -16, hw, 0.02)
+		local mp = V3(-hw * 0.4, hh * 0.55, -26)
+		ellipsoid(world, V3(5, 5, 5), C(230, 244, 255), CF(mp), NEON, 0.12)
+		local halo1 = ellipsoid(world, V3(8, 8, 8), C(170, 215, 255), CF(mp), NEON, 0.88)
+		local halo2 = ellipsoid(world, V3(12, 12, 12), C(150, 200, 255), CF(mp), NEON, 0.94)
+		anim(function(_, t)
+			halo1.Transparency = 0.86 + 0.03 * sin(t * 0.9)
+			halo2.Transparency = 0.93 + 0.02 * sin(t * 0.6 + 1)
+		end)
+	
+		-- frozen lake + far ice spires
+		box(world, V3(90, 0.4, 44), C(110, 175, 220), CF(0, -8.25, -6), ICE, 0.15)
+		for i = 1, 5 do
+			local x = -hw * 1.3 + (i - 0.5) * (hw * 2.6 / 5) + rng:NextNumber(-1, 1)
+			local h = rng:NextNumber(8, 13)
+			box(world, V3(1.6, h, 1.6), C(120, 175, 225), CF(x, -8 + h / 2, -16) * ANG(0, rad(45), rad(rng:NextNumber(-5, 5))), ICE, 0.35)
+		end
+	
+		-- crystal clusters with pulsing cores
+		local tips = {}
 		for i = 1, 6 do
 			local x = -hw + (i - 0.5) * (2 * hw / 6) + rng:NextNumber(-0.6, 0.6)
 			local z = rng:NextNumber(-7, -1)
@@ -1301,96 +1670,459 @@ do
 				box(world, V3(0.8, h, 0.8), col, cf0 * CF(0, h / 2, 0) * ANG(0, rad(45), 0), ICE, 0.18)
 				box(world, V3(0.62, 0.62, 0.62), col, cf0 * CF(0, h + 0.1, 0) * ANG(rad(45), rad(45), 0), ICE, 0.12)
 				local core = ellipsoid(world, V3(0.3, h * 0.8, 0.3), C(110, 240, 255), cf0 * CF(0, h / 2, 0), NEON)
+				tips[#tips + 1] = (cf0 * CF(0, h + 0.2, 0.5)).Position
 				local ph = rng:NextNumber(0, 6)
 				anim(function(_, t) core.Transparency = 0.35 + 0.3 * sin(t * 2 + ph) end)
 			end
 		end
-		-- floating shards
+		every(tk, 0.3, function() sparkle(pick(tips), C(235, 250, 255), rng:NextNumber(0.35, 0.7), 0.7) end)
+		every(tk, 0.9, function()
+			sparkle(V3(rng:NextNumber(-hw, hw), -8, rng:NextNumber(-6, 2)), C(190, 235, 255), rng:NextNumber(0.25, 0.5), 0.8)
+		end)
+	
+		-- floating shards that shatter and re-form
+		local shards = {}
 		for _ = 1, 7 do
 			local p = V3(rng:NextNumber(-hw, hw), rng:NextNumber(-2, 7), rng:NextNumber(-8, 0))
-			local s = box(world, V3(0.25, rng:NextNumber(0.8, 1.6), 0.25), C(190, 235, 255), CF(p), ICE, 0.1)
-			local ph, rs = rng:NextNumber(0, 6), rng:NextNumber(0.4, 1.2)
-			anim(function(_, t) s.CFrame = CF(p + V3(0, sin(t + ph) * 0.4, 0)) * ANG(t * rs, t * rs * 0.7, rad(25)) end)
-		end
-		every(tk, 0.1, function() -- snow
-			emit({ pos = V3(rng:NextNumber(-hw, hw), 9, rng:NextNumber(-8, 3)), vel = V3(rng:NextNumber(-0.7, 0.2), -rng:NextNumber(1.3, 2.3), 0),
-				size = rng:NextNumber(0.07, 0.16), col = C(245, 252, 255), life = 7.5, fadeAt = 0.85 })
-		end)
-		local breath = { C(190, 240, 255), C(255, 255, 255), C(120, 200, 255) }
-		task.delay(1, function() if token == tk then flyDragon(ICE_PAL, -1, 3.5, -3, 6.5, breath) end end)
-		every(tk, function() return rng:NextNumber(8, 12) end, function()
-			flyDragon(ICE_PAL, -1, rng:NextNumber(2.5, 5), rng:NextNumber(-4, -2), 6.5, breath)
-		end, true)
-	end
-
-	BUILD.space = function(tk)
-		light(C(60, 52, 100), C(255, 236, 214), V3(-0.8, -0.35, -0.45))
-		local hw = extent()
-		local starCols = { C(255, 255, 255), C(190, 220, 255), C(255, 200, 230) }
-		for _ = 1, 40 do
-			local z = rng:NextNumber(-24, -8)
-			local s = rng:NextNumber(0.08, 0.2)
-			local st = ellipsoid(world, V3(s, s, s), pick(starCols), CF(rng:NextNumber(-hw * 2, hw * 2), rng:NextNumber(-10, 10), z), NEON)
-			local ph, sp = rng:NextNumber(0, 6), (z + 26) * 0.03
-			anim(function(dt, t)
-				local p = st.Position
-				local nx = p.X - dt * sp
-				if nx < -hw * 2 then nx = hw * 2 end
-				st.Position = V3(nx, p.Y, p.Z)
-				st.Transparency = 0.15 + 0.5 * (sin(t * 2 + ph) + 1) / 2
-			end)
-		end
-		-- planet, atmosphere, ring, moon
-		local pc = V3(hw * 0.5, 2.2, -4)
-		local planet = ellipsoid(world, V3(4.4, 4.4, 4.4), C(240, 140, 90), CF(pc))
-		local atmo = ellipsoid(world, V3(4.9, 4.9, 4.9), C(255, 170, 200), CF(pc), NEON, 0.82)
-		local tilt = ANG(rad(72), 0, rad(-16))
-		local ring = {}
-		for i = 1, 70 do
-			local s = rng:NextNumber(0.1, 0.24)
-			ring[i] = {
-				p = ellipsoid(world, V3(s, s, s), C(255, 226, 180):Lerp(C(190, 140, 110), rng:NextNumber()), CF(pc)),
-				a = rng:NextNumber(0, 2 * pi), r = rng:NextNumber(3.2, 5.2),
+			shards[#shards + 1] = {
+				part = box(world, V3(0.25, rng:NextNumber(0.8, 1.6), 0.25), C(190, 235, 255), CF(p), ICE, 0.1),
+				home = p, ph = rng:NextNumber(0, 6), rs = rng:NextNumber(0.4, 1.2), hideUntil = 0,
 			}
 		end
-		local moon = ellipsoid(world, V3(0.9, 0.9, 0.9), C(200, 205, 220), CF(pc))
 		anim(function(_, t)
-			planet.CFrame = CF(pc + V3(0, sin(t * 0.8) * 0.12, 0))
-			atmo.CFrame = planet.CFrame
-			for _, r in ipairs(ring) do
-				local a = r.a + t * 0.12
-				r.p.CFrame = CF(pc) * tilt * CF(cos(a) * r.r, 0, sin(a) * r.r)
+			for _, s in ipairs(shards) do
+				s.part.CFrame = CF(s.home + V3(0, sin(t + s.ph) * 0.4, 0)) * ANG(t * s.rs, t * s.rs * 0.7, rad(25))
+				s.part.Transparency = t < s.hideUntil and 1 or math.max(0.1, s.part.Transparency - 0.06)
 			end
-			moon.CFrame = CF(pc + V3(cos(t * 0.45) * 6.5, sin(t * 0.45) * 1.4, sin(t * 0.45) * 3.5))
 		end)
-		for _ = 1, 4 do -- asteroids
-			local p = V3(rng:NextNumber(-hw, hw), rng:NextNumber(-6, 4), rng:NextNumber(-7, -1))
-			local s = rng:NextNumber(0.3, 0.7)
-			local r = ellipsoid(world, V3(s, s * 0.7, s * 0.85), C(120, 112, 130), CF(p), SLATE)
-			local ph = rng:NextNumber(0, 6)
-			anim(function(_, t) r.CFrame = CF(p + V3(sin(t * 0.3 + ph) * 0.5, cos(t * 0.4 + ph) * 0.4, 0)) * ANG(t * 0.6, t * 0.4, ph) end)
-		end
-		every(tk, function() return rng:NextNumber(5, 9) end, function() -- shooting star
-			local p0 = V3(rng:NextNumber(0, hw), rng:NextNumber(3, 8), -6)
-			local t0 = os.clock()
-			local sc = ellipsoid(world, V3(1.8, 0.07, 0.07), C(235, 245, 255), CF(p0), NEON)
-			anim(function(_, t)
-				local a = (t - t0) / 0.9
-				if a >= 1 then sc:Destroy() return false end
-				sc.CFrame = CF(p0 + V3(-12, -6, 0) * a) * ANG(0, 0, rad(-27))
-				sc.Transparency = a * a
-			end)
+		every(tk, function() return rng:NextNumber(5, 9) end, function()
+			local s = pick(shards)
+			local at = s.part.Position
+			s.hideUntil = os.clock() + 2.2
+			s.part.Transparency = 1
+			shock(at, C(200, 240, 255), 1.8, 0.5, "xy", 14)
+			burst(at, 14, { cols = FROST, min = 2, max = 6, acc = V3(0, -3, 0), s0 = 0.05, s1 = 0.12, l0 = 0.6, l1 = 1.2, stretch = 3 })
 		end, true)
+	
+		-- snow: far layer + big out-of-focus foreground flakes, both pushed by gusts
+		every(tk, 0.13, function()
+			for _ = 1, gusting > 0.3 and 3 or 1 do
+				emit({
+					pos = V3(rng:NextNumber(-hw, hw * 1.2), 9, rng:NextNumber(-8, 3)), vel = V3(rng:NextNumber(-0.7, 0.2), -rng:NextNumber(1.2, 2.2), 0),
+					size = rng:NextNumber(0.06, 0.15), col = C(245, 252, 255), life = 7, fadeAt = 0.85, snow = true,
+				})
+			end
+		end)
+		every(tk, 0.55, function()
+			emit({
+				pos = V3(rng:NextNumber(-hw, hw), 9, rng:NextNumber(4, 9)), vel = V3(rng:NextNumber(-1, 0), -rng:NextNumber(2, 3.2), 0),
+				size = rng:NextNumber(0.22, 0.4), col = C(255, 255, 255), life = 4, fadeAt = 0.7, snow = true,
+			})
+		end)
+		anim(function(dt)
+			if wind == 0 then return end
+			for _, o in ipairs(P3) do
+				if o.snow then o.vel = V3(math.clamp(o.vel.X + wind * dt, -9, 9), o.vel.Y, o.vel.Z) end
+			end
+		end)
+	
+		-- blizzard gust
+		local frost = mk("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = C(220, 240, 255), BackgroundTransparency = 1, BorderSizePixel = 0 }, overlay)
+		local function gustEvent()
+			local t0 = os.clock()
+			anim(function(_, t)
+				local a = (t - t0) / 5
+				if a >= 1 then
+					wind, gusting = 0, 0
+					frost.BackgroundTransparency = 1
+					return false
+				end
+				local k = sin(a * pi)
+				wind, gusting = -9 * k, k
+				frost.BackgroundTransparency = 1 - 0.18 * k
+				if rng:NextNumber() < 0.7 * k then
+					emit({
+						pos = V3(hw * 1.3, rng:NextNumber(-6, 9), rng:NextNumber(-8, 2)), vel = V3(-rng:NextNumber(18, 26), rng:NextNumber(-3, 0), 0),
+						size = 0.05, stretch = 14, col = C(235, 248, 255), life = 1.0, fadeAt = 0.5,
+					})
+				end
+			end)
+		end
+		task.delay(5, function() if token == tk then gustEvent() end end)
+		every(tk, function() return rng:NextNumber(14, 20) end, gustEvent, true)
+	
+		-- ground fog
+		for i = 1, 4 do
+			local m = ellipsoid(world, V3(rng:NextNumber(6, 9), 0.7, 2.5), C(205, 232, 250), CF(0, -6.3 + i * 0.25, rng:NextNumber(-8, -1)), SMOOTH, 0.82)
+			local x0, sp = rng:NextNumber(-hw, hw), rng:NextNumber(0.1, 0.3) * (i % 2 == 0 and 1 or -1)
+			anim(function(_, t)
+				local p = m.Position
+				m.Position = V3(((x0 + t * sp + hw * 1.5) % (hw * 3)) - hw * 1.5, p.Y, p.Z)
+			end)
+		end
+	
+		-- dragon
+		local DO = { breath = FROST, breath2 = C(60, 120, 200), ring = C(170, 230, 255), trail = { C(220, 245, 255), C(150, 215, 255) } }
+		task.delay(1, function() if token == tk then dragonPass(ICE_PAL, -1, 3.5, -3, 6.5, DO) end end)
+		every(tk, function() return rng:NextNumber(8, 12) end, function()
+			dragonPass(ICE_PAL, -1, rng:NextNumber(2.5, 5), rng:NextNumber(-4, -2), 6.5, DO)
+		end, true)
+	end
+	
+	----------------------------------------------------------------
+	-- SPACE: the whole solar system.
+	--   Sun (flares, spots, CMEs) • Mercury → Neptune + Pluto on dotted tilted orbits
+	--   Moon • Jupiter's bands/Red Spot/4 moons • Saturn's rings + Titan • asteroid belt
+	--   comet with ion + dust tails • nebulae • spiral galaxy • shooting stars • rocket
+	----------------------------------------------------------------
+
+	BUILD.space = function(tk)
+		light(C(66, 58, 104), C(255, 240, 222), V3(0.45, -0.45, -0.75))
+		local hw, hh = extent()
+	
+		-- slow parallax camera for depth
+		camFn = function(t)
+			cam.CFrame = CFrame.lookAt(V3(sin(t * 0.12) * 1.4, 1.2 + sin(t * 0.09) * 0.5, 22 + sin(t * 0.07) * 1.2), V3(0, -0.2, 0))
+		end
+	
+		-- nebulae (2D) + stars + spiral galaxy
+		local NEB = {
+			{ 0.15, 0.20, 0.85, C(140, 70, 255), 0.90, 14 },
+			{ 0.88, 0.68, 1.00, C(40, 120, 255), 0.91, 18 },
+			{ 0.42, 0.95, 0.80, C(255, 80, 170), 0.93, 16 },
+			{ 0.80, 0.10, 0.60, C(70, 255, 220), 0.95, 12 },
+		}
+		for i, n in ipairs(NEB) do
+			local b = softBlob(layer, n[1], n[2], n[3], n[4], n[5])
+			loopTween(b, n[6], { Position = UDim2.fromScale(n[1] + 0.05 * (i % 2 == 0 and 1 or -1), n[2] + 0.03) })
+		end
+		starfield(46, { C(255, 255, 255), C(190, 220, 255), C(255, 205, 230), C(255, 240, 190) }, -26, -9, hw, 0.03)
+		do
+			local gp = V3(-hw * 0.5, hh * 0.64, -27)
+			local gf = CF(gp) * ANG(rad(58), rad(10), rad(-22))
+			ellipsoid(world, V3(1.5, 1.5, 0.6), C(255, 236, 200), gf, NEON, 0.35)
+			ellipsoid(world, V3(3.4, 3.4, 1), C(190, 170, 255), gf, NEON, 0.88)
+			local dots, N = {}, qn(44)
+			for k = 1, N do
+				local u = k / N
+				dots[k] = {
+					u = u, arm = k % 2 == 0 and 0 or pi,
+					p = ellipsoid(world, V3(0.16, 0.16, 0.16) * (1.2 - u), C(255, 236, 200):Lerp(C(120, 160, 255), u), CF(gp), NEON, 0.1 + 0.4 * u),
+				}
+			end
+			anim(function(_, t)
+				for _, d in ipairs(dots) do
+					local ang = d.u * 3.6 + d.arm + t * 0.08
+					local r = 0.4 + d.u * 3.0
+					d.p.Position = (gf * CF(cos(ang) * r, sin(ang) * r, 0)).Position
+				end
+			end)
+		end
+	
+		-- layout: orbits are tilted ellipses around the sun, scaled to fit the window
+		local TILT = 42
+		local sinE = sin(rad(TILT))
+		local OUT = 8.9
+		local S = math.min(hw * 0.93, hh * 0.9 / sinE) * 0.92 / OUT
+		local sysCF = CF(0, -0.3, -2) * ANG(rad(TILT), 0, rad(-7))
+		local sunPos = sysCF.Position
+		local SUN_R = 1.2 * S
+	
+		local DEF = {
+			{ n = "mercury", r = 2.15, R = 0.17, spin = 0.6 },
+			{ n = "venus", r = 2.75, R = 0.26, spin = -0.3 },
+			{ n = "earth", r = 3.35, R = 0.29, spin = 1.6, axial = -10 },
+			{ n = "mars", r = 3.95, R = 0.23, spin = 1.5, axial = -12 },
+			{ n = "jupiter", r = 5.70, R = 0.66, spin = 2.4, tiltX = 8 },
+			{ n = "saturn", r = 6.75, R = 0.54, spin = 2.0, tiltX = 26, axial = -14 },
+			{ n = "uranus", r = 7.60, R = 0.38, spin = 1.2, axial = 78 },
+			{ n = "neptune", r = 8.35, R = 0.36, spin = 1.4, axial = -10 },
+			{ n = "pluto", r = 8.90, R = 0.12, spin = 0.5, inc = 17 },
+		}
+		local function wOf(r) return 0.105 * (3.35 / r) ^ 1.2 end -- Earth ≈ one lap per minute
+	
+		-- dotted orbit paths
+		for _, d in ipairs(DEF) do
+			d.frame = d.inc and sysCF * ANG(rad(d.inc), 0, 0) or sysCF
+			local n = qn(14 + math.floor(d.r * 3.6))
+			for k = 1, n do
+				local a = k / n * 2 * pi
+				ellipsoid(world, V3(0.026, 0.026, 0.026), C(150, 175, 255), CF((d.frame * CF(cos(a) * d.r * S, 0, sin(a) * d.r * S)).Position), NEON, 0.5)
+			end
+		end
+	
+		-- body helpers: every part keeps a CFrame relative to the planet; spinMul 0 = does not rotate with the planet
+		local function newBody()
+			local b = { items = {} }
+			function b.add(p, rel, spinMul)
+				b.items[#b.items + 1] = { p, rel or CF(), spinMul or 0 }
+				return p
+			end
+			function b.update(cf, spin)
+				for _, it in ipairs(b.items) do
+					if it[3] == 0 then
+						it[1].CFrame = cf * it[2]
+					else
+						it[1].CFrame = cf * ANG(0, spin * it[3], 0) * it[2]
+					end
+				end
+			end
+			return b
+		end
+		local function ball(b, Rw, col, mat, tr, mul, spinMul)
+			local d = 2 * Rw * mul
+			return b.add(ellipsoid(world, V3(d, d, d), col, CF(), mat, tr), CF(), spinMul)
+		end
+		local function patch(b, Rw, lat, lon, w, h, col, mat, spinMul, rr)
+			local la, lo = rad(lat), rad(lon)
+			local dir = V3(cos(la) * sin(lo), sin(la), cos(la) * cos(lo))
+			local up = math.abs(dir.Y) > 0.9 and V3(1, 0, 0) or V3(0, 1, 0)
+			local pos = dir * Rw * (rr or 0.985)
+			local p = ellipsoid(world, V3(w * Rw, h * Rw, Rw * 0.14), col, CF(), mat or SMOOTH)
+			b.add(p, CFrame.lookAt(pos, pos + dir, up), spinMul or 1)
+		end
+		local function bands(b, Rw, list)
+			for _, bd in ipairs(list) do
+				local la = rad(bd[1])
+				local w = 2 * Rw * cos(la) * 1.03
+				b.add(ellipsoid(world, V3(w, bd[2] * Rw, w), bd[3], CF(), SMOOTH), CF(0, Rw * sin(la), 0), 0)
+			end
+		end
+		local function ring(b, Rw, r1, r2, n, col, tr)
+			local rm, wd = (r1 + r2) / 2 * Rw, (r2 - r1) * Rw
+			local arc = 2 * pi * rm / n
+			for k = 1, n do
+				local a = k / n * 2 * pi
+				local p = box(world, V3(arc * 1.12, 0.012, wd), col:Lerp(C(255, 255, 255), rng:NextNumber(0, 0.12)), CF(), SMOOTH, tr)
+				b.add(p, CF(cos(a) * rm, 0, sin(a) * rm) * ANG(0, -(a + pi / 2), 0), 0)
+			end
+		end
+	
+		-- the sun
+		local sunBody = newBody()
+		local sunBall = ball(sunBody, SUN_R, C(255, 205, 100), NEON, 0, 1, 1)
+		for _, sp in ipairs({ { 18, 20 }, { -12, 70 }, { 25, -50 }, { -22, -20 } }) do
+			patch(sunBody, SUN_R, sp[1], sp[2], 0.26, 0.2, C(150, 70, 20), SMOOTH, 1, 0.99)
+		end
+		local corona = {
+			ball(sunBody, SUN_R, C(255, 170, 60), NEON, 0.78, 1.22, 0),
+			ball(sunBody, SUN_R, C(255, 140, 40), NEON, 0.88, 1.55, 0),
+			ball(sunBody, SUN_R, C(255, 110, 30), NEON, 0.95, 2.2, 0),
+		}
+	
+		-- planets
+		local planets, byName = {}, {}
+		local function buildPlanet(d)
+			local Rw = d.R * S
+			local b = newBody()
+			local n = d.n
+			if n == "mercury" then
+				ball(b, Rw, C(170, 162, 154), SLATE, 0, 1, 1)
+				patch(b, Rw, 20, 35, 0.7, 0.6, C(120, 114, 108))
+				patch(b, Rw, -15, -40, 0.5, 0.45, C(130, 124, 118))
+			elseif n == "venus" then
+				ball(b, Rw, C(230, 190, 112), SMOOTH, 0, 1, 1)
+				patch(b, Rw, 10, 0, 1.4, 0.5, C(244, 214, 150), SMOOTH, 1.5, 1.0)
+				ball(b, Rw, C(255, 226, 160), NEON, 0.82, 1.1, 0)
+			elseif n == "earth" then
+				ball(b, Rw, C(36, 96, 212), SMOOTH, 0, 1, 1)
+				patch(b, Rw, 22, 12, 1.0, 0.8, C(66, 160, 82))
+				patch(b, Rw, -18, 70, 0.8, 1.0, C(76, 168, 88))
+				patch(b, Rw, 38, -55, 0.9, 0.6, C(60, 150, 76))
+				patch(b, Rw, -35, -20, 0.6, 0.7, C(86, 170, 90))
+				patch(b, Rw, 82, 0, 0.7, 0.7, C(240, 246, 255))
+				patch(b, Rw, -82, 0, 0.7, 0.7, C(240, 246, 255))
+				for _, c in ipairs({ { 30, 40 }, { -10, -30 }, { 5, 120 }, { -40, 80 } }) do
+					patch(b, Rw, c[1], c[2], 0.8, 0.35, C(255, 255, 255), SMOOTH, 1.7, 1.02)
+				end
+				ball(b, Rw, C(120, 180, 255), NEON, 0.86, 1.14, 0)
+			elseif n == "mars" then
+				ball(b, Rw, C(204, 92, 54), SMOOTH, 0, 1, 1)
+				patch(b, Rw, 10, 30, 1.2, 0.7, C(140, 56, 34))
+				patch(b, Rw, -20, -50, 0.9, 0.8, C(226, 130, 84))
+				patch(b, Rw, 84, 0, 0.6, 0.6, C(245, 245, 250))
+			elseif n == "jupiter" then
+				ball(b, Rw, C(214, 170, 128), SMOOTH, 0, 1, 1)
+				bands(b, Rw, {
+					{ -52, 0.16, C(176, 120, 84) }, { -34, 0.12, C(236, 214, 176) }, { -18, 0.14, C(160, 100, 70) },
+					{ -4, 0.12, C(244, 224, 190) }, { 10, 0.14, C(176, 116, 80) }, { 26, 0.12, C(232, 208, 172) }, { 44, 0.14, C(166, 110, 78) },
+				})
+				patch(b, Rw, -20, 30, 0.34, 0.2, C(200, 74, 48))
+			elseif n == "saturn" then
+				ball(b, Rw, C(226, 200, 146), SMOOTH, 0, 1, 1)
+				bands(b, Rw, { { -40, 0.1, C(196, 166, 118) }, { -20, 0.12, C(240, 220, 170) }, { 0, 0.12, C(206, 176, 128) }, { 22, 0.1, C(238, 216, 166) }, { 42, 0.1, C(190, 160, 114) } })
+				ring(b, Rw, 1.35, 1.62, qn(30), C(205, 180, 135), 0.25)
+				ring(b, Rw, 1.70, 2.05, qn(36), C(238, 216, 172), 0.12)
+				ring(b, Rw, 2.12, 2.26, qn(24), C(190, 170, 130), 0.35)
+			elseif n == "uranus" then
+				ball(b, Rw, C(156, 226, 232), SMOOTH, 0, 1, 1)
+				ball(b, Rw, C(190, 245, 255), NEON, 0.88, 1.12, 0)
+				ring(b, Rw, 1.65, 1.8, qn(22), C(200, 230, 240), 0.4)
+			elseif n == "neptune" then
+				ball(b, Rw, C(44, 84, 222), SMOOTH, 0, 1, 1)
+				patch(b, Rw, -20, 10, 1.1, 0.7, C(24, 44, 150))
+				patch(b, Rw, 10, 40, 1.4, 0.25, C(220, 235, 255))
+				ball(b, Rw, C(100, 150, 255), NEON, 0.86, 1.12, 0)
+			else -- pluto
+				ball(b, Rw, C(204, 176, 154), SMOOTH, 0, 1, 1)
+				patch(b, Rw, 10, 20, 1.0, 0.9, C(244, 228, 214))
+			end
+			local pl = {
+				d = d, b = b, Rw = Rw, a = rng:NextNumber(0, 2 * pi), w = wOf(d.r), spin = d.spin or 1.2,
+				tilt = ANG(rad(d.tiltX or 12), 0, rad(d.axial or 0)), pos = sunPos,
+			}
+			planets[#planets + 1] = pl
+			byName[n] = pl
+		end
+		for _, d in ipairs(DEF) do buildPlanet(d) end
+	
+		-- moons: Earth's Moon, Jupiter's Galileans, Saturn's Titan
+		local moons = {}
+		local function addMoon(pl, orbitMul, sizeMul, col, period, mat)
+			moons[#moons + 1] = {
+				pl = pl, r = pl.Rw * orbitMul, w = 2 * pi / period, a = rng:NextNumber(0, 2 * pi),
+				p = ellipsoid(world, V3(1, 1, 1) * pl.Rw * 2 * sizeMul, col, CF(), mat or SLATE),
+			}
+		end
+		addMoon(byName.earth, 2.4, 0.27, C(200, 200, 206), 9)
+		addMoon(byName.jupiter, 1.7, 0.1, C(255, 230, 150), 4)
+		addMoon(byName.jupiter, 2.1, 0.09, C(210, 220, 230), 7)
+		addMoon(byName.jupiter, 2.6, 0.13, C(190, 170, 150), 11)
+		addMoon(byName.jupiter, 3.2, 0.12, C(150, 140, 130), 17)
+		addMoon(byName.saturn, 3.0, 0.1, C(236, 190, 120), 13)
+	
+		-- asteroid belt between Mars and Jupiter
+		local belt = {}
+		for _ = 1, qn(90) do
+			local r = rng:NextNumber(4.3, 4.85)
+			local s = rng:NextNumber(0.03, 0.07)
+			belt[#belt + 1] = {
+				p = ellipsoid(world, V3(s, s * 0.8, s * 0.9), C(130, 120, 110):Lerp(C(190, 170, 150), rng:NextNumber()), CF(), SLATE),
+				r = r, a = rng:NextNumber(0, 2 * pi), w = wOf(r), y = rng:NextNumber(-0.1, 0.1),
+			}
+		end
+	
+		-- master update
+		anim(function(dt, t)
+			sunBody.update(CF(sunPos), t * 0.25)
+			sunBall.Color = C(255, 205, 100):Lerp(C(255, 160, 60), (sin(t * 0.9) + 1) / 4)
+			for i, c in ipairs(corona) do c.Transparency = ({ 0.78, 0.88, 0.95 })[i] + 0.03 * sin(t * 1.3 + i) end
+			for _, pl in ipairs(planets) do
+				pl.a += pl.w * dt
+				local d = pl.d
+				pl.pos = (d.frame * CF(cos(pl.a) * d.r * S, 0, sin(pl.a) * d.r * S)).Position
+				pl.b.update(CF(pl.pos) * pl.tilt, t * pl.spin)
+			end
+			for _, m in ipairs(moons) do
+				m.a += m.w * dt
+				m.p.Position = m.pl.pos + sysCF:VectorToWorldSpace(V3(cos(m.a), sin(m.a) * 0.12, sin(m.a)) * m.r)
+			end
+			for _, r in ipairs(belt) do
+				r.a += r.w * dt
+				r.p.Position = (sysCF * CF(cos(r.a) * r.r * S, r.y * S, sin(r.a) * r.r * S)).Position
+			end
+		end)
+	
+		-- solar prominences + coronal mass ejection with a sweeping shock ring
+		every(tk, 0.2, function()
+			local d = V3(rng:NextNumber(-1, 1), rng:NextNumber(-1, 1), rng:NextNumber(0.1, 1)).Unit
+			emit({
+				pos = sunPos + d * SUN_R * 1.02, vel = d * rng:NextNumber(1.6, 3), acc = -d * rng:NextNumber(2.2, 3.4),
+				size = rng:NextNumber(0.07, 0.15), col = C(255, 214, 110), col2 = C(255, 70, 20), life = rng:NextNumber(1.0, 1.7), shrink = 0.4, fadeAt = 0.5,
+			})
+		end)
+		every(tk, function() return rng:NextNumber(14, 22) end, function()
+			local d = V3(rng:NextNumber(-1, 1), rng:NextNumber(-0.6, 0.6), rng:NextNumber(0.2, 1)).Unit
+			for _ = 1, qn(18) do
+				local spread = V3(rng:NextNumber(-0.3, 0.3), rng:NextNumber(-0.3, 0.3), rng:NextNumber(-0.3, 0.3))
+				emit({
+					pos = sunPos + d * SUN_R, vel = (d + spread).Unit * rng:NextNumber(2.5, 5.5), drag = 0.5,
+					size = rng:NextNumber(0.12, 0.26), col = C(255, 200, 100), col2 = C(255, 60, 20), life = rng:NextNumber(1.6, 2.6), grow = 0.8, shrink = 0.2, fadeAt = 0.4,
+				})
+			end
+			shock(sunPos, C(255, 190, 100), math.max(hw, hh) * 1.2, 3.2, "xy", 30)
+			flashScreen(C(255, 190, 110), 0.93, 0.8)
+		end, true)
+	
+		-- comet with ion (blue) + dust (gold) tails; both point away from the sun
+		local function comet()
+			local dir = rng:NextInteger(0, 1) * 2 - 1
+			local head = ellipsoid(world, V3(0.18, 0.18, 0.18), C(235, 248, 255), CF(), NEON)
+			local coma = ellipsoid(world, V3(0.42, 0.42, 0.42), C(150, 210, 255), CF(), NEON, 0.72)
+			local t0, dur = os.clock(), 12
+			anim(function(_, t)
+				local u = (t - t0) / dur
+				if u >= 1 then
+					head:Destroy() coma:Destroy()
+					return false
+				end
+				local p = V3(dir * hw * 1.3 * (1 - 2 * u), -3 + 10 * (2 * u - 1) ^ 2, -2 + sin(u * pi) * 3)
+				head.Position, coma.Position = p, p
+				local away = (p - sunPos)
+				if away.Magnitude < 0.1 then return end
+				away = away.Unit
+				if rng:NextNumber() < 0.8 then
+					emit({
+						pos = p, vel = away * 3 + V3(rng:NextNumber(-0.3, 0.3), rng:NextNumber(-0.3, 0.3), 0), size = 0.15,
+						col = C(120, 200, 255), col2 = C(40, 60, 160), life = 0.9, shrink = 0.5, fadeAt = 0.3,
+					})
+				end
+				if rng:NextNumber() < 0.7 then
+					local side = V3(-away.Y, away.X, 0) * 0.6
+					emit({
+						pos = p, vel = away * 1.5 + side, size = 0.2, col = C(255, 235, 190), col2 = C(120, 90, 60),
+						life = 1.4, shrink = 0.6, fadeAt = 0.3,
+					})
+				end
+			end)
+		end
+		task.delay(3, function() if token == tk then comet() end end)
+		every(tk, function() return rng:NextNumber(20, 30) end, comet, true)
+	
+		-- shooting stars, twinkles, rocket
+		every(tk, function() return rng:NextNumber(3, 6) end, function()
+			emit({
+				pos = V3(rng:NextNumber(-hw * 0.2, hw * 1.3), rng:NextNumber(hh * 0.3, hh * 1.1), -8), vel = V3(-14, -5.5, 0),
+				size = 0.06, stretch = 16, col = C(235, 245, 255), life = 0.9, fadeAt = 0.3,
+			})
+		end, true)
+		every(tk, 1.4, function()
+			sparkle(V3(rng:NextNumber(-hw * 1.5, hw * 1.5), rng:NextNumber(-9, 9), -22), C(255, 255, 255), rng:NextNumber(0.5, 0.9), 0.9)
+		end)
+		task.delay(5, function() if token == tk then rocket() end end)
 		every(tk, function() return rng:NextNumber(14, 20) end, rocket, true)
 	end
+	
+	----------------------------------------------------------------
+	-- MURIM: moonlit karst peaks + a cultivator on a floating platform with orbiting flying
+	--        swords. Every ~25 s: heavenly tribulation (storm clouds, golden lightning) ending
+	--        in a breakthrough (light pillar, shockwaves). Cranes, lanterns, waterfall, petals.
+	----------------------------------------------------------------
 
 	BUILD.murim = function(tk)
 		light(C(105, 112, 124), C(255, 240, 210), V3(0.3, -0.7, -0.6))
 		local hw = extent()
+		local GOLD = { C(255, 214, 120), C(255, 236, 170), C(255, 190, 80) }
+		local qiTarget, qiNow = 1, 1
+		local cloudTarget, cloudNow = 0, 0
+	
+		-- moon, halo, stars, drifting cloud wisps
+		local mc = V3(hw * 0.3, 4.5, -21.5)
 		ellipsoid(world, V3(9, 9, 9), C(255, 232, 170), CF(hw * 0.3, 4.5, -22), NEON, 0.85)
-		local moon = ellipsoid(world, V3(6, 6, 6), C(255, 238, 190), CF(hw * 0.3, 4.5, -21.5), NEON)
-		anim(function(_, t) moon.CFrame = CF(hw * 0.3, 4.5 + sin(t * 0.4) * 0.2, -21.5) end)
-		-- karst peaks, far -> near
+		local halo = ellipsoid(world, V3(13, 13, 13), C(255, 226, 150), CF(hw * 0.3, 4.5, -22.5), NEON, 0.94)
+		local moon = ellipsoid(world, V3(6, 6, 6), C(255, 238, 190), CF(mc), NEON)
+		anim(function(_, t)
+			moon.CFrame = CF(hw * 0.3, 4.5 + sin(t * 0.4) * 0.2, -21.5)
+			halo.Transparency = 0.93 + 0.03 * sin(t * 0.8)
+		end)
+		starfield(16, { C(255, 244, 214), C(214, 230, 255) }, -26, -23, hw, 0.015)
+		for i = 1, 3 do
+			local c = ellipsoid(world, V3(rng:NextNumber(7, 11), 0.7, 2), C(70, 78, 86), CF(), SMOOTH, 0.5)
+			local x0, y, sp = rng:NextNumber(-hw, hw), rng:NextNumber(1.5, 7), rng:NextNumber(0.1, 0.25) * (i % 2 == 0 and 1 or -1)
+			anim(function(_, t) c.Position = V3(((x0 + t * sp + hw * 2) % (hw * 4)) - hw * 2, y, -19) end)
+		end
+	
+		-- karst peaks, far -> near, with a pagoda and glowing windows
 		local layersDef = { { -15, C(118, 130, 130) }, { -10, C(78, 90, 92) }, { -5.5, C(36, 44, 44) } }
 		local pagodaDone = false
 		for li, def in ipairs(layersDef) do
@@ -1408,11 +2140,30 @@ do
 						local y = top + (k - 1) * 0.8
 						box(world, V3(1.0 - k * 0.2, 0.45, 1.0 - k * 0.2), C(150, 40, 34), CF(x, y + 0.25, def[1]))
 						box(world, V3(1.7 - k * 0.3, 0.1, 1.7 - k * 0.3), C(30, 26, 26), CF(x, y + 0.55, def[1]))
+						local win = box(world, V3(0.18, 0.14, 0.06), C(255, 200, 110), CF(x, y + 0.25, def[1] + 0.5 - k * 0.1), NEON)
+						local ph = rng:NextNumber(0, 6)
+						anim(function(_, t) win.Transparency = 0.1 + 0.4 * (sin(t * 2 + ph) + 1) / 2 end)
 					end
 					ellipsoid(world, V3(0.18, 0.18, 0.18), C(255, 214, 120), CF(x, top + 2.55, def[1]), NEON)
 				end
 			end
 		end
+	
+		-- waterfall on its own cliff
+		local wx = -hw * 0.62
+		ellipsoid(world, V3(3.2, 11, 2.4), C(50, 60, 60), CF(wx, -2, -9.4), SLATE)
+		local falls = {}
+		for i = 1, 7 do falls[i] = box(world, V3(0.32, 1.1, 0.12), C(235, 245, 250), CF(wx, 2.6 - i * 0.95, -8.15), NEON, 0.35) end
+		anim(function(_, t)
+			for i, p in ipairs(falls) do p.Transparency = 0.3 + 0.35 * (0.5 + 0.5 * sin(t * 5 - i * 1.1)) end
+		end)
+		every(tk, 0.12, function()
+			emit({
+				pos = V3(wx + rng:NextNumber(-0.3, 0.3), -4.2, -8), vel = V3(rng:NextNumber(-1, 1), rng:NextNumber(1, 2.5), 0), acc = V3(0, -3, 0),
+				size = rng:NextNumber(0.1, 0.2), col = C(235, 245, 250), mat = SMOOTH, life = 0.9, grow = 1.5,
+			})
+		end)
+	
 		-- drifting mist
 		for i = 1, 5 do
 			local m = ellipsoid(world, V3(rng:NextNumber(6, 9), 0.6, 2.5), C(215, 222, 220), CF(0, -4 + i * 1.1, rng:NextNumber(-9, -3)), SMOOTH, 0.8)
@@ -1422,7 +2173,8 @@ do
 				m.Position = V3(((x0 + t * sp + hw * 1.5) % (hw * 3)) - hw * 1.5, p.Y, p.Z)
 			end)
 		end
-		-- floating sword
+	
+		-- big ghost sword guarding the left side (kept from the original)
 		local sw = sword3d(world)
 		local home = V3(-hw * 0.35, 2.5, -1)
 		local lastTip = nil
@@ -1435,16 +2187,217 @@ do
 			end
 			lastTip = tip
 		end)
-		every(tk, 0.3, function() -- petals
-			emit({ pos = V3(rng:NextNumber(-hw, hw), 9, rng:NextNumber(-6, 2)), vel = V3(rng:NextNumber(-1.3, 0.2), -rng:NextNumber(1, 1.8), 0),
+	
+		-- floating cultivation platform + seated cultivator
+		local px, py, pz = hw * 0.12, -1.4, -2.5
+		local plat = ellipsoid(world, V3(4.6, 1.3, 3.2), C(46, 52, 54), CF(px, py, pz), SLATE)
+		local under = ellipsoid(world, V3(2.6, 2.2, 2.0), C(32, 38, 40), CF(px, py - 1.2, pz), SLATE)
+		local circle = ellipsoid(world, V3(3.8, 0.05, 3.8), C(255, 214, 120), CF(px, py + 0.62, pz), NEON, 0.75)
+		local runes = {}
+		for i = 1, qn(10) do runes[i] = { p = ellipsoid(world, V3(0.12, 0.12, 0.12), pick(GOLD), CF(), NEON), a = i / 10 * 2 * pi } end
+		for i = 1, 8 do
+			local a = i / 8 * 2 * pi
+			ellipsoid(world, V3(0.5, 0.12, 0.3), i % 2 == 0 and C(255, 214, 226) or C(255, 244, 250), CF(px + cos(a) * 1.1, py + 0.72, pz + sin(a) * 0.75) * ANG(0, -a, rad(20)), SMOOTH)
+		end
+	
+		local K = 0.9
+		local cult = mk("Model", {}, world)
+		local crig = {}
+		local function CS(size, col, rel)
+			crig[#crig + 1] = { ellipsoid(cult, size * K, col, CF()), rel }
+		end
+		local robe, ink, skin = C(236, 236, 246), C(30, 30, 42), C(238, 206, 184)
+		CS(V3(1.7, 0.9, 1.3), robe, CF(0, 0.1 * K, 0))
+		CS(V3(0.95, 1.2, 0.8), robe, CF(0, 0.85 * K, 0))
+		CS(V3(1.55, 0.35, 0.45), robe, CF(0, 0.95 * K, 0.32 * K))
+		CS(V3(0.4, 0.3, 0.3), skin, CF(0, 0.7 * K, 0.5 * K))
+		CS(V3(0.55, 0.55, 0.55), skin, CF(0, 1.65 * K, 0))
+		CS(V3(0.62, 0.42, 0.6), ink, CF(0, 1.82 * K, -0.07 * K))
+		CS(V3(0.22, 0.22, 0.22), ink, CF(0, 2.15 * K, -0.05 * K))
+		local aura = ellipsoid(world, V3(3.4, 3.4, 3.4), C(255, 220, 140), CF(px, py + 1.6, pz), NEON, 0.9)
+	
+		-- orbiting flying swords
+		local fswords = {}
+		for i = 1, 5 do
+			fswords[i] = {
+				blade = box(world, V3(1.0, 0.05, 0.14), C(222, 234, 248), CF(), NEON, 0.15),
+				edge = box(world, V3(1.0, 0.06, 0.04), C(255, 220, 130), CF(), NEON),
+				a = i / 5 * 2 * pi,
+			}
+		end
+	
+		-- storm clouds for the tribulation
+		local clouds = {}
+		for i = 1, 7 do
+			clouds[i] = {
+				p = ellipsoid(world, V3(rng:NextNumber(3, 5), rng:NextNumber(1, 1.6), 2.4), C(40, 30, 60), CF(), SMOOTH, 1),
+				x = px + (i - 4) * 1.4, y = 7.5 + rng:NextNumber(0, 1), ph = rng:NextNumber(0, 6),
+			}
+		end
+		local dark = mk("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = C(14, 4, 26), BackgroundTransparency = 1, BorderSizePixel = 0 }, overlay)
+	
+		local swordCF = {}
+		anim(function(dt, t)
+			qiNow += (qiTarget - qiNow) * math.min(1, dt * 2)
+			cloudNow += (cloudTarget - cloudNow) * math.min(1, dt * 1.5)
+			local bob = sin(t * 1.2) * 0.08
+			plat.CFrame = CF(px, py + bob, pz)
+			under.CFrame = CF(px, py - 1.2 + bob, pz) * ANG(0, t * 0.1, 0)
+			circle.CFrame = CF(px, py + 0.62 + bob, pz) * ANG(0, t * 0.5, 0)
+			circle.Transparency = 0.75 - 0.2 * (qiNow - 1) / 2 + 0.05 * sin(t * 3)
+			local root = CF(px, py + 1.0 + bob + sin(t * 1.2) * 0.04, pz)
+			for _, e in ipairs(crig) do e[1].CFrame = root * e[2] end
+			aura.CFrame = root * CF(0, 0.6, 0)
+			local sc = 3.4 + 0.25 * sin(t * 2) + (qiNow - 1) * 0.8
+			aura.Size = V3(sc, sc, sc)
+			aura.Transparency = math.clamp(0.92 - 0.12 * (qiNow - 1) - 0.03 * sin(t * 2), 0.4, 1)
+			for _, r in ipairs(runes) do
+				local a = r.a + t * 0.6 * qiNow
+				r.p.Position = V3(px + cos(a) * 1.7, py + 0.7 + bob, pz + sin(a) * 1.2)
+			end
+			for _, s in ipairs(fswords) do
+				s.a += dt * (1.1 * qiNow)
+				local a = s.a
+				local cf = CF(px, py + 1.9 + bob, pz) * ANG(0, 0, rad(14)) * CF(cos(a) * 2.2, sin(a * 2) * 0.15, sin(a) * 2.2) * ANG(0, -(a + pi / 2), 0)
+				s.blade.CFrame, s.edge.CFrame = cf, cf * CF(0, 0.04, 0)
+				if rng:NextNumber() < 0.3 then
+					emit({ pos = cf.Position, vel = V3(0, rng:NextNumber(0, 0.4), 0), size = 0.09, col = pick(GOLD), life = 0.6, shrink = 0.6 })
+				end
+			end
+			for _, c in ipairs(clouds) do
+				c.p.CFrame = CF(c.x + sin(t * 0.4 + c.ph) * 0.4, c.y + sin(t * 0.6 + c.ph) * 0.15, pz - 3)
+				c.p.Transparency = 1 - 0.75 * cloudNow
+			end
+		end)
+		every(tk, 0.09, function() -- qi vortex rising around the cultivator
+			local a = rng:NextNumber(0, 2 * pi)
+			for _ = 1, qiNow > 1.5 and 3 or 1 do
+				emit({
+					pos = V3(px + cos(a) * 1.0, py + 0.7, pz + sin(a) * 0.8), vel = V3(-sin(a) * 1.2, rng:NextNumber(1.4, 2.4) * qiNow, cos(a) * 0.9),
+					size = rng:NextNumber(0.07, 0.14), col = pick(GOLD), life = 1.5, shrink = 0.6, fadeAt = 0.4,
+				})
+			end
+		end)
+	
+		local function strike()
+			local top = V3(px + rng:NextNumber(-2, 2), 8.2, pz - 2)
+			local hit = V3(px + rng:NextNumber(-0.4, 0.4), py + 2.6, pz)
+			bolt(top, hit, C(255, 240, 200), 0.3, 9, 0.8, 0.16)
+			bolt(top + V3(1, 0, 0), hit + V3(rng:NextNumber(-3, 3), -2, 0), C(255, 200, 120), 0.22, 6, 0.6, 0.08)
+			flashScreen(C(255, 240, 210), 0.55, 0.35)
+			shake(0.26)
+			shock(V3(px, py - 0.3, pz), C(255, 214, 120), 4, 0.7, "xz", 22)
+			burst(hit, 14, { cols = GOLD, min = 3, max = 8, acc = V3(0, -6, 0), l0 = 0.4, l1 = 0.9, stretch = 4 })
+		end
+		local function pillar()
+			local p1 = box(world, V3(1.6, 24, 1.6), C(255, 226, 150), CF(px, py + 9, pz), NEON, 0.5)
+			local p2 = box(world, V3(0.7, 24, 0.7), C(255, 255, 240), CF(px, py + 9, pz), NEON, 0.2)
+			local t0 = os.clock()
+			anim(function(_, t)
+				local a = (t - t0) / 2.2
+				if a >= 1 then
+					p1:Destroy() p2:Destroy()
+					return false
+				end
+				p1.Size = V3(1.6 + a * 2.5, 24, 1.6 + a * 2.5)
+				p1.Transparency = 0.5 + 0.5 * a
+				p2.Transparency = 0.2 + 0.8 * a
+			end)
+		end
+		local function breakthrough()
+			task.spawn(function()
+				qiTarget, cloudTarget = 3, 1
+				TweenService:Create(dark, TweenInfo.new(1.4), { BackgroundTransparency = 0.5 }):Play()
+				task.wait(2.2)
+				for _ = 1, 3 do
+					if token ~= tk then return end
+					strike()
+					task.wait(rng:NextNumber(0.7, 1.1))
+				end
+				if token ~= tk then return end
+				task.wait(0.4)
+				pillar()
+				flashScreen(C(255, 236, 170), 0.2, 1.0)
+				shake(0.35)
+				shock(V3(px, py - 0.2, pz), C(255, 226, 150), 9, 1.4, "xz", 30)
+				shock(V3(px, py + 1.4, pz + 0.2), C(255, 236, 190), hw * 1.4, 2.2, "xy", 34)
+				burst(V3(px, py + 1.4, pz), 28, { cols = GOLD, min = 3, max = 9, acc = V3(0, -1.5, 0), l0 = 0.8, l1 = 1.8, s0 = 0.1, s1 = 0.3, drag = 0.4 })
+				qiTarget, cloudTarget = 1, 0
+				TweenService:Create(dark, TweenInfo.new(2.2), { BackgroundTransparency = 1 }):Play()
+			end)
+		end
+		task.delay(6, function() if token == tk then breakthrough() end end)
+		every(tk, function() return rng:NextNumber(22, 30) end, breakthrough, true)
+	
+		-- flock of cranes
+		local function crane()
+			local model = mk("Model", {}, world)
+			local rig = {}
+			local WHITE, DARK = C(246, 248, 250), C(30, 30, 34)
+			local function CR(size, col, rel) rig[#rig + 1] = { ellipsoid(model, size, col, CF()), rel } end
+			CR(V3(0.8, 0.22, 0.24), WHITE, CF(0, 0, 0))
+			CR(V3(0.5, 0.1, 0.1), WHITE, CF(0.55, 0.12, 0) * ANG(0, 0, rad(35)))
+			CR(V3(0.16, 0.14, 0.14), C(220, 60, 60), CF(0.85, 0.28, 0))
+			CR(V3(0.5, 0.05, 0.08), DARK, CF(-0.5, -0.02, 0))
+			local wings = {}
+			for s = -1, 1, 2 do
+				wings[#wings + 1] = { s = s, p = ellipsoid(model, V3(0.5, 0.04, 1.1), WHITE, CF()), tip = ellipsoid(model, V3(0.4, 0.04, 0.5), DARK, CF()) }
+			end
+			local function update(root, t)
+				for _, e in ipairs(rig) do e[1].CFrame = root * e[2] end
+				local f = sin(t * 5) * 0.7
+				for _, w in ipairs(wings) do
+					local base = root * CF(0, 0.05, 0.1 * w.s) * ANG(f * w.s, 0, 0)
+					w.p.CFrame = base * CF(0, 0, 0.55 * w.s)
+					w.tip.CFrame = base * CF(-0.05, 0, 1.2 * w.s) * ANG(f * 0.5 * w.s, 0, 0)
+				end
+			end
+			return { model = model, update = update }
+		end
+		local FORM = { { 0, 0 }, { -1.5, 0.7 }, { -1.5, -0.7 }, { -3, 1.4 } }
+		local function craneFlock()
+			local birds = {}
+			for i = 1, #FORM do birds[i] = crane() end
+			local dir = rng:NextInteger(0, 1) * 2 - 1
+			local y0 = rng:NextNumber(2.5, 6)
+			local hwx = extent() + 5
+			local t0, dur = os.clock(), 10
+			anim(function(_, t)
+				local a = (t - t0) / dur
+				if a >= 1 then
+					for _, b in ipairs(birds) do b.model:Destroy() end
+					return false
+				end
+				local x = dir * (-hwx + 2 * hwx * a)
+				for i, b in ipairs(birds) do
+					local off = FORM[i]
+					b.update(CF(x + off[1] * dir, y0 + off[2] + sin(t * 1.5 + i) * 0.15, -9 - i * 0.2) * ANG(0, dir == 1 and 0 or pi, 0), t + i * 0.4)
+				end
+			end)
+		end
+		task.delay(4, function() if token == tk then craneFlock() end end)
+		every(tk, function() return rng:NextNumber(16, 24) end, craneFlock, true)
+	
+		-- petals, qi motes from the ground, rising lanterns
+		every(tk, 0.3, function()
+			emit({
+				pos = V3(rng:NextNumber(-hw, hw), 9, rng:NextNumber(-6, 2)), vel = V3(rng:NextNumber(-1.3, 0.2), -rng:NextNumber(1, 1.8), 0),
 				size = V3(0.22, 0.03, 0.14), col = pick({ C(232, 140, 150), C(250, 200, 205) }), mat = SMOOTH, life = 8,
-				spin = V3(rng:NextNumber(-3, 3), rng:NextNumber(-3, 3), rng:NextNumber(-3, 3)), fadeAt = 0.9 })
+				spin = V3(rng:NextNumber(-3, 3), rng:NextNumber(-3, 3), rng:NextNumber(-3, 3)), fadeAt = 0.9,
+			})
 		end)
-		every(tk, 0.5, function() -- qi motes
-			emit({ pos = V3(rng:NextNumber(-hw, hw), -7, rng:NextNumber(-6, 0)), vel = V3(rng:NextNumber(-0.4, 0.4), rng:NextNumber(2, 3.5), 0),
-				size = 0.1, col = C(255, 214, 120), life = 4 })
+		every(tk, 0.5, function()
+			emit({ pos = V3(rng:NextNumber(-hw, hw), -7, rng:NextNumber(-6, 0)), vel = V3(rng:NextNumber(-0.4, 0.4), rng:NextNumber(2, 3.5), 0), size = 0.1, col = C(255, 214, 120), life = 4 })
 		end)
-		every(tk, function() return rng:NextNumber(5, 9) end, function() -- sword-qi slash arc
+		every(tk, 1.6, function()
+			emit({
+				pos = V3(rng:NextNumber(-hw, hw), -7, rng:NextNumber(-8, -2)), vel = V3(rng:NextNumber(-0.3, 0.3), rng:NextNumber(0.6, 0.9), 0),
+				size = V3(0.28, 0.38, 0.28), col = pick({ C(255, 90, 60), C(255, 150, 60) }), col2 = C(255, 214, 120), life = 14, fadeAt = 0.85,
+			})
+		end)
+	
+		-- sword-qi slash arcs (kept from the original)
+		every(tk, function() return rng:NextNumber(5, 9) end, function()
 			local cx, cy, a0 = rng:NextNumber(-hw * 0.5, hw * 0.5), rng:NextNumber(-1, 4), rng:NextNumber(30, 120)
 			local segs, t0 = {}, os.clock()
 			for i = 0, 8 do
@@ -1452,7 +2405,10 @@ do
 			end
 			anim(function(_, t)
 				local a = (t - t0) / 0.5
-				if a >= 1 then for _, s in ipairs(segs) do s[1]:Destroy() end return false end
+				if a >= 1 then
+					for _, s in ipairs(segs) do s[1]:Destroy() end
+					return false
+				end
 				local sweep = math.min(a * 3, 1)
 				for i, s in ipairs(segs) do
 					local ang = rad(s[2] + 10 * sweep)
@@ -1465,9 +2421,6 @@ do
 		end, true)
 	end
 
-	----------------------------------------------------------------
-	-- HUNTER: Solo Leveling style dungeon gate, hunter slashing goblins, shadow soldiers rise
-	----------------------------------------------------------------
 	BUILD.hunter = function(tk)
 		light(C(86, 76, 160), C(176, 190, 255), V3(-0.3, -0.5, -0.8))
 		local hw = extent()
@@ -2133,6 +3086,270 @@ do
 			emit({ pos = V3(rng:NextNumber(-Wc * 0.7, Wc * 0.7), rng:NextNumber(-3, 5), rng:NextNumber(-20, 4)),
 				vel = V3(rng:NextNumber(-0.2, 0.2), rng:NextNumber(-0.1, 0.2), 0), size = 0.05, col = C(230, 210, 190), life = 5, fadeAt = 0.5 })
 		end)
+	end
+
+	-- PART E — add-ons for Hunter / Jungle / FNAF (original builders still run first)
+	-- (paste after BUILD.fnaf, before "apply a theme's scene + card transparency")
+	------------------------------------------------------------------------
+	
+	-- HUNTER: gate surges, shadow smoke, sky lightning, "ARISE"
+	local baseHunter = BUILD.hunter
+	BUILD.hunter = function(tk)
+		baseHunter(tk)
+		local hw = extent()
+		local gx, gy, gz, ground = -hw + 3.0, -0.5, -3.2, -5.4
+		local VIO, BLU = C(180, 100, 255), C(110, 150, 255)
+	
+		every(tk, function() return rng:NextNumber(5, 8) end, function() -- gate surge
+			shock(V3(gx, gy, gz + 0.4), pick({ VIO, BLU }), 6.5, 1.1, "xy", 26)
+			shock(V3(gx + 0.8, ground + 0.06, gz + 1.4), VIO, 7, 1.2, "xz", 24)
+			flashScreen(C(150, 130, 255), 0.88, 0.5)
+			shake(0.08)
+		end, true)
+		every(tk, 0.3, function() -- shadow smoke along the floor
+			emit({
+				pos = V3(rng:NextNumber(-hw, hw), ground + 0.2, rng:NextNumber(-6, 1)), vel = V3(rng:NextNumber(-0.4, 0.4), rng:NextNumber(0.4, 0.9), 0),
+				size = 0.5, col = C(46, 20, 100), col2 = C(10, 4, 30), mat = SMOOTH, life = 3, grow = 2.5, fadeAt = 0.3,
+			})
+		end)
+		every(tk, function() return rng:NextNumber(2.5, 4) end, function() -- sky lightning
+			local x = rng:NextNumber(-hw, hw)
+			bolt(V3(x, 10, -12), V3(x + rng:NextNumber(-3, 3), 2, -12), pick({ C(190, 160, 255), C(150, 190, 255) }), 0.25, 8, 0.8, 0.1)
+		end, true)
+	
+		local fontT = FONT_TITLE or Enum.Font.GothamBlack
+		every(tk, function() return rng:NextNumber(11, 16) end, function() -- ARISE
+			local lbl = mk("TextLabel", {
+				AnchorPoint = V2(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.62), Size = UDim2.fromOffset(280, 60), BackgroundTransparency = 1,
+				Text = "ARISE", Font = fontT, TextSize = 20, TextColor3 = C(190, 130, 255), TextStrokeColor3 = C(20, 0, 50),
+				TextStrokeTransparency = 0.2, TextTransparency = 1, ZIndex = 4,
+			}, overlay)
+			TweenService:Create(lbl, TweenInfo.new(0.35, Enum.EasingStyle.Back), { TextSize = 46, TextTransparency = 0 }):Play()
+			task.delay(1.2, function()
+				if lbl.Parent then TweenService:Create(lbl, TweenInfo.new(0.7), { TextTransparency = 1, TextStrokeTransparency = 1 }):Play() end
+			end)
+			task.delay(2, function() if lbl.Parent then lbl:Destroy() end end)
+			flashScreen(C(140, 90, 255), 0.82, 0.8)
+			local x = rng:NextNumber(-hw * 0.2, hw * 0.8)
+			for _ = 1, 3 do
+				burst(V3(x + rng:NextNumber(-1, 1), ground + 0.4, 0), 6, { cols = { VIO, BLU }, min = 1.5, max = 4, acc = V3(0, 3, 0), l0 = 0.8, l1 = 1.4, s0 = 0.08, s1 = 0.2 })
+			end
+			shake(0.1)
+		end, true)
+	end
+	
+	-- JUNGLE: distant volcano, meteor strike, tropical thunderstorm, butterflies, light motes
+	local baseJungle = BUILD.jungle
+	BUILD.jungle = function(tk)
+		baseJungle(tk)
+		local hw = extent()
+		local ground = -6
+	
+		-- far volcano with smoke
+		local vx = hw * 0.9
+		for i = 1, 6 do
+			local f = (i - 1) / 5
+			local d = 15 - f * 12
+			cyl(world, V3(1.2, d, d), C(70, 76, 80):Lerp(C(110, 100, 104), f), CF(vx, ground + i * 1.2 - 0.6, -27) * ANG(0, 0, rad(90)), SLATE)
+		end
+		local vcrater = ellipsoid(world, V3(2.2, 0.5, 2.2), C(255, 140, 40), CF(vx, ground + 7.4, -27), NEON)
+		anim(function(_, t) vcrater.Transparency = 0.15 + 0.3 * (sin(t * 2.2) + 1) / 2 end)
+		every(tk, 0.5, function()
+			emit({
+				pos = V3(vx, ground + 7.6, -27), vel = V3(rng:NextNumber(-1.4, -0.5), rng:NextNumber(1, 1.8), 0), size = 0.9,
+				col = C(112, 106, 102), col2 = C(60, 58, 60), mat = SMOOTH, life = 7, grow = 3.5, fadeAt = 0.4,
+			})
+		end)
+	
+		-- meteor
+		local function meteor()
+			local s0 = V3(hw * 1.3, 12, -22)
+			local e0 = V3(-hw * 0.3, ground + 0.3, -22)
+			local head = ellipsoid(world, V3(0.7, 0.7, 0.7), C(255, 170, 70), CF(s0), NEON)
+			local core = ellipsoid(world, V3(0.35, 0.35, 0.35), C(255, 255, 230), CF(s0), NEON)
+			local t0, dur = os.clock(), 2.6
+			anim(function(_, t)
+				local a = (t - t0) / dur
+				if a >= 1 then
+					head:Destroy() core:Destroy()
+					flashScreen(C(255, 170, 80), 0.55, 0.9)
+					shake(0.3)
+					shock(e0, C(255, 190, 90), 9, 1.3, "xz", 28)
+					shock(e0 + V3(0, 1, 0), C(255, 230, 160), 6, 0.9, "xy", 24)
+					burst(e0, 16, { cols = { C(90, 80, 70), C(140, 120, 100) }, mat = SMOOTH, min = 1, max = 4, s0 = 0.5, s1 = 1, grow = 2, l0 = 2, l1 = 3, fadeAt = 0.3 })
+					return false
+				end
+				local p = s0:Lerp(e0, a ^ 1.2)
+				head.Position, core.Position = p, p
+				for _ = 1, 2 do
+					emit({
+						pos = p, vel = V3(rng:NextNumber(-0.5, 0.5), rng:NextNumber(-0.2, 0.8), 0), size = rng:NextNumber(0.25, 0.5),
+						col = pick({ C(255, 170, 70), C(255, 230, 150) }), col2 = C(60, 30, 20), life = 0.8, shrink = 0.6, fadeAt = 0.3,
+					})
+				end
+			end)
+		end
+		task.delay(9, function() if token == tk then meteor() end end)
+		every(tk, function() return rng:NextNumber(28, 42) end, meteor, true)
+	
+		-- tropical thunderstorm
+		local stormDark = mk("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = C(8, 20, 24), BackgroundTransparency = 1, BorderSizePixel = 0 }, overlay)
+		local function storm()
+			local t0, dur = os.clock(), 13
+			local nextBolt = t0 + 2.5
+			TweenService:Create(stormDark, TweenInfo.new(1.8), { BackgroundTransparency = 0.6 }):Play()
+			anim(function(_, t)
+				local a = t - t0
+				if a > dur then
+					TweenService:Create(stormDark, TweenInfo.new(2.4), { BackgroundTransparency = 1 }):Play()
+					return false
+				end
+				local k = math.min(1, a / 1.5, (dur - a) / 1.5)
+				for _ = 1, math.floor(3 * k + 0.5) do
+					emit({
+						pos = V3(rng:NextNumber(-hw * 1.3, hw * 1.3), 10, rng:NextNumber(-9, 4)), vel = V3(-2.5, -24, 0), size = 0.035, stretch = 22,
+						col = C(190, 215, 235), life = 0.62, fadeAt = 0.75,
+					})
+				end
+				if rng:NextNumber() < 0.35 * k then
+					emit({
+						pos = V3(rng:NextNumber(-hw, hw), ground + 0.1, rng:NextNumber(-8, 2)), vel = V3(rng:NextNumber(-1, 1), rng:NextNumber(1, 2.5), 0), acc = V3(0, -9, 0),
+						size = 0.06, col = C(210, 230, 240), life = 0.4,
+					})
+				end
+				if t > nextBolt then
+					nextBolt = t + rng:NextNumber(2, 4)
+					local x = rng:NextNumber(-hw, hw)
+					bolt(V3(x, 11, -20), V3(x + rng:NextNumber(-3, 3), ground + 0.5, -20), C(235, 240, 255), 0.25, 9, 0.9, 0.14)
+					flashScreen(C(225, 235, 255), 0.5, 0.4)
+					shake(0.12)
+				end
+			end)
+		end
+		task.delay(18, function() if token == tk then storm() end end)
+		every(tk, function() return rng:NextNumber(38, 52) end, storm, true)
+	
+		-- butterflies
+		local BFC = { C(70, 150, 255), C(255, 170, 50), C(255, 240, 110) }
+		for _, col in ipairs(BFC) do
+			local body = ellipsoid(world, V3(0.18, 0.05, 0.05), C(30, 24, 20), CF(), SMOOTH)
+			local wl = ellipsoid(world, V3(0.2, 0.02, 0.26), col, CF(), NEON)
+			local wr = ellipsoid(world, V3(0.2, 0.02, 0.26), col, CF(), NEON)
+			local ph = rng:NextNumber(0, 6)
+			local bx, by, bz = rng:NextNumber(-hw * 0.8, hw * 0.8), rng:NextNumber(-3.8, -1.8), rng:NextNumber(-3, 1)
+			anim(function(_, t)
+				local x, y, z = bx + sin(t * 0.45 + ph) * 3.2, by + sin(t * 1.1 + ph * 2) * 0.7, bz + cos(t * 0.35 + ph) * 1.2
+				local heading = cos(t * 0.45 + ph) >= 0 and 0 or pi
+				local root = CF(x, y, z) * ANG(0, heading, 0)
+				local f = sin(t * 20 + ph) * 0.9 + 0.2
+				body.CFrame = root
+				wl.CFrame = root * CF(0, 0, 0.14) * ANG(f, 0, 0) * CF(0, 0, 0.13)
+				wr.CFrame = root * CF(0, 0, -0.14) * ANG(-f, 0, 0) * CF(0, 0, -0.13)
+			end)
+		end
+	
+		every(tk, 0.5, function() -- dust motes drifting in the light shafts
+			emit({
+				pos = V3(rng:NextNumber(-hw, hw), rng:NextNumber(-3, 6), rng:NextNumber(-8, 0)), vel = V3(rng:NextNumber(-0.2, 0.2), rng:NextNumber(-0.1, 0.2), 0),
+				size = 0.05, col = C(255, 246, 200), life = 5, fadeAt = 0.4,
+			})
+		end)
+	end
+	
+	-- FNAF: camera-feed overlay (scanlines, grain, labels), eyes in the dark, sparks, drips
+	local baseFnaf = BUILD.fnaf
+	BUILD.fnaf = function(tk)
+		baseFnaf(tk)
+		local ENABLE_JUMPSCARE = false
+		local hw = extent()
+		local Wc, floorY = hw * 0.95, -6
+		local fontT = FONT_TITLE or Enum.Font.GothamBlack
+	
+		for i = 1, 26 do -- scanlines
+			mk("Frame", { Position = UDim2.fromScale(0, i / 26), Size = UDim2.new(1, 0, 0, 1), BackgroundColor3 = C(0, 0, 0), BackgroundTransparency = 0.82, BorderSizePixel = 0 }, overlay)
+		end
+		local grain = {} -- video noise
+		for i = 1, 30 do
+			grain[i] = mk("Frame", { Size = UDim2.fromOffset(2, 2), BackgroundColor3 = C(255, 255, 255), BackgroundTransparency = 0.9, BorderSizePixel = 0 }, overlay)
+		end
+		every(tk, 0.07, function()
+			for _, g in ipairs(grain) do
+				g.Position = UDim2.fromScale(rng:NextNumber(), rng:NextNumber())
+				g.BackgroundTransparency = rng:NextNumber(0.8, 0.96)
+			end
+		end)
+		mk("TextLabel", {
+			Position = UDim2.new(0, 10, 0, 8), Size = UDim2.fromOffset(220, 16), BackgroundTransparency = 1, Text = "CAM 02  —  SHOW STAGE",
+			Font = fontT, TextSize = 12, TextColor3 = C(244, 226, 206), TextXAlignment = Enum.TextXAlignment.Left,
+		}, overlay)
+		local power = mk("TextLabel", {
+			AnchorPoint = V2(1, 0), Position = UDim2.new(1, -10, 0, 8), Size = UDim2.fromOffset(120, 16), BackgroundTransparency = 1, Text = "POWER 100%",
+			Font = fontT, TextSize = 12, TextColor3 = C(244, 226, 206), TextXAlignment = Enum.TextXAlignment.Right,
+		}, overlay)
+		local pct = 100
+		every(tk, 20, function()
+			pct = pct <= 12 and 100 or pct - 3
+			power.Text = "POWER " .. pct .. "%"
+			power.TextColor3 = pct < 30 and C(255, 80, 70) or C(244, 226, 206)
+		end, true)
+	
+		every(tk, function() return rng:NextNumber(6, 12) end, function() -- eyes in the dark
+			local x, y, z = rng:NextNumber(-Wc * 0.7, Wc * 0.7), rng:NextNumber(-1, 3), rng:NextNumber(-20, -12)
+			local gap = rng:NextNumber(0.35, 0.5)
+			local eyes = {}
+			for s = -1, 1, 2 do eyes[#eyes + 1] = ellipsoid(world, V3(0.22, 0.12, 0.1), C(255, 255, 255), CF(x + s * gap, y, z), NEON) end
+			local t0 = os.clock()
+			anim(function(_, t)
+				local k = (t - t0) / 1.6
+				if k >= 1 then
+					for _, e in ipairs(eyes) do e:Destroy() end
+					return false
+				end
+				local tr = sin(k * pi * 7) > 0.4 and 0 or 1
+				for _, e in ipairs(eyes) do e.Transparency = tr end
+			end)
+		end, true)
+	
+		every(tk, function() return rng:NextNumber(9, 15) end, function() -- ceiling sparks
+			local pos = V3(rng:NextNumber(-Wc * 0.5, Wc * 0.5), 6.1, rng:NextNumber(-18, -4))
+			burst(pos, 12, { cols = { C(255, 200, 100), C(255, 255, 200) }, min = 1, max = 4, acc = V3(0, -12, 0), s0 = 0.04, s1 = 0.08, l0 = 0.5, l1 = 0.9, stretch = 3 })
+			flashScreen(C(255, 210, 140), 0.9, 0.2)
+		end, true)
+	
+		every(tk, 1.7, function() -- dripping pipe
+			local x = -Wc * 0.35
+			emit({ pos = V3(x, 6, -5), vel = V3(0, -3, 0), acc = V3(0, -14, 0), size = 0.05, stretch = 3, col = C(170, 190, 220), life = 1.15, fadeAt = 0.8 })
+			task.delay(1.1, function()
+				if token == tk then
+					burst(V3(x, floorY + 0.1, -5), 3, { cols = { C(170, 190, 220) }, min = 0.6, max = 1.6, acc = V3(0, -6, 0), s0 = 0.03, s1 = 0.06, l0 = 0.3, l1 = 0.5 })
+				end
+			end)
+		end)
+	
+		if ENABLE_JUMPSCARE then
+			every(tk, function() return rng:NextNumber(50, 80) end, function()
+				flashScreen(C(255, 30, 20), 0.35, 0.35)
+				shake(0.35)
+				local eyes = {}
+				for s = -1, 1, 2 do
+					local e = mk("Frame", {
+						AnchorPoint = V2(0.5, 0.5), Position = UDim2.fromScale(0.5 + s * 0.14, 0.45), Size = UDim2.fromOffset(46, 30),
+						BackgroundColor3 = C(255, 255, 255), BorderSizePixel = 0, ZIndex = 5,
+					}, overlay)
+					mk("UICorner", { CornerRadius = UDim.new(1, 0) }, e)
+					eyes[#eyes + 1] = e
+				end
+				task.delay(0.22, function() for _, e in ipairs(eyes) do if e.Parent then e:Destroy() end end end)
+			end, true)
+		end
+	end
+	
+	-- keep scene state clean: every scene starts with the default camera and no shake
+	for name, fn in pairs(BUILD) do
+		BUILD[name] = function(tk)
+			camFn, shakeAmt = nil, 0
+			return fn(tk)
+		end
 	end
 
 	----------------------------------------------------------------
