@@ -1,0 +1,2455 @@
+print("[GrindBrawl] starting")
+
+-- Shut down any previous copy so connections/loops never stack up on re-execute
+local env = (getgenv and getgenv()) or _G
+if env.GrindBrawlCleanup then
+	pcall(env.GrindBrawlCleanup)
+	env.GrindBrawlCleanup = nil
+end
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Stats = game:GetService("Stats")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local VirtualUser = game:GetService("VirtualUser")
+local HttpService = game:GetService("HttpService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+local old = playerGui:FindFirstChild("GrindBrawlUI")
+if old then old:Destroy() end
+
+local muscleEvent = player:WaitForChild("muscleEvent", 10)
+local rEvents = ReplicatedStorage:WaitForChild("rEvents", 10)
+local brawlEvent = rEvents and rEvents:WaitForChild("brawlEvent", 10)
+local fireMuscle = muscleEvent and muscleEvent.FireServer
+local fireBrawl = brawlEvent and brawlEvent.FireServer
+
+local CONFIG = {
+	JoinTimeout = 15,
+	JoinRetryDelay = 0.4,
+	JoinMovedStuds = 30,
+	ArenaRadius = 400,
+	PunchInterval = 0.03,
+	FollowBehindStuds = 3,
+	MaxBrawlSeconds = 240,
+	ReturnTimeout = 8,
+	ReturnTolerance = 6,
+	PreJoinJumps = 2,
+	PreJoinJumpDelay = 0.4,
+	PreJoinMaxForce = 4,
+}
+
+local BG_PASS_ID = 167231617
+local BG_IMAGE = "rbxthumb://type=GamePass&id=" .. BG_PASS_ID .. "&w=420&h=420"
+local BG_URL = "https://tr.rbxcdn.com/180DAY-37a59f753946c580454d87d888ad8edf/420/420/Image/Png/noFilter"
+
+local state = {
+	fastRep = false,
+	repLoopActive = false,
+	repsPerTick = 1,
+	brawlBusy = false,
+	autoBrawl = false,
+	reSit = true,
+	brawlActive = false,
+	brawlToken = 0,
+	origin = nil,
+	manualOrigin = false,
+	brawlsDone = 0,
+	autoEgg = false,
+	eggInterval = 1800,
+	eggsEaten = 0,
+	antiAfk = true,
+	keepSeated = true,
+	seatedSeen = false,
+	lastSeatCF = nil,
+	brawlStartedAt = nil,
+	forceFinish = nil,
+	prevTool = nil,
+	seatedAtStart = false,
+	altMode = false,
+	mainName = "",
+}
+
+local ping = {
+	enabled = true,
+	pausePing = 250,
+	resumePing = 200,
+	pauseDuration = 1,
+	last = 0,
+}
+
+-- Every service-level connection goes through here so shutdown can drop them all
+local conns = {}
+local function track(c)
+	conns[#conns + 1] = c
+	return c
+end
+
+local registerThemed
+local function create(className, props, parent)
+	local obj = Instance.new(className)
+	for k, v in pairs(props or {}) do
+		obj[k] = v
+		if registerThemed and typeof(v) == "Color3" then registerThemed(obj, k, v) end
+	end
+	obj.Parent = parent
+	return obj
+end
+
+local function getRoot()
+	local c = player.Character
+	return c and (c:FindFirstChild("HumanoidRootPart") or c.PrimaryPart)
+end
+
+local function getHumanoid()
+	local c = player.Character
+	return c and c:FindFirstChildOfClass("Humanoid")
+end
+
+local function pressE()
+	pcall(function()
+		VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+		task.wait(0.05)
+		VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+	end)
+end
+
+local function isHeldByMachine()
+	local hum = getHumanoid()
+	return hum ~= nil and (hum.Sit or hum.SeatPart ~= nil)
+end
+
+local suffixes = { "", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc" }
+local function fmt(n)
+	n = n or 0
+	local sign = n < 0 and "-" or ""
+	n = math.abs(n)
+	local i = 1
+	while n >= 1000 and i < #suffixes do
+		n = n / 1000
+		i += 1
+	end
+	if i == 1 then return sign .. string.format("%d", math.floor(n + 0.5)) end
+	return sign .. string.format("%.2f%s", n, suffixes[i])
+end
+
+local function fmtTime(s)
+	s = math.floor(s)
+	return string.format("%02d:%02d:%02d", s // 3600, (s % 3600) // 60, s % 60)
+end
+
+local function tween(obj, time, props, style, dir)
+	local tw = TweenService:Create(obj, TweenInfo.new(time, style or Enum.EasingStyle.Quad, dir or Enum.EasingDirection.Out), props)
+	tw:Play()
+	return tw
+end
+
+local INK = Color3.fromRGB(44, 48, 92)
+local CREAM = Color3.fromRGB(255, 247, 241)
+local PINK = Color3.fromRGB(255, 140, 172)
+local TEAL = Color3.fromRGB(104, 200, 208)
+
+local COLORS = {
+	bg = Color3.fromRGB(214, 168, 164),
+	text = INK,
+	ink = INK,
+	cream = CREAM,
+	pink = PINK,
+	teal = TEAL,
+	muted = Color3.fromRGB(116, 120, 158),
+	accent = PINK,
+	accent2 = TEAL,
+	blue = Color3.fromRGB(124, 158, 190),
+	green = Color3.fromRGB(64, 188, 130),
+	red = Color3.fromRGB(236, 84, 108),
+	off = Color3.fromRGB(205, 198, 218),
+}
+
+local THEMES = {
+	light = {
+		ink_b = INK, ink_t = INK, ink_s = INK,
+		cream_b = CREAM, cream_t = CREAM, cream_s = CREAM,
+		pink = PINK, teal = TEAL,
+		muted = COLORS.muted, off = COLORS.off, bg = COLORS.bg,
+		white = Color3.new(1, 1, 1),
+		green = COLORS.green, red = COLORS.red,
+		rose = Color3.fromRGB(226, 72, 112),
+		aqua = Color3.fromRGB(36, 156, 168),
+		violet = Color3.fromRGB(128, 92, 206),
+		pinkHover = Color3.fromRGB(255, 163, 190),
+		creamHover = Color3.fromRGB(255, 232, 224),
+		knob = CREAM,
+		onPink = INK,
+	},
+	dark = {
+		ink_b = Color3.fromRGB(10, 10, 24),
+		ink_t = Color3.fromRGB(236, 232, 250),
+		ink_s = Color3.fromRGB(10, 10, 24),
+		cream_b = Color3.fromRGB(34, 36, 64),
+		cream_t = Color3.fromRGB(255, 240, 246),
+		cream_s = Color3.fromRGB(18, 18, 38),
+		pink = PINK, teal = Color3.fromRGB(110, 214, 222),
+		muted = Color3.fromRGB(158, 162, 204),
+		off = Color3.fromRGB(70, 72, 104),
+		bg = Color3.fromRGB(30, 24, 46),
+		white = Color3.fromRGB(22, 24, 44),
+		green = Color3.fromRGB(72, 214, 148),
+		red = Color3.fromRGB(255, 98, 124),
+		rose = Color3.fromRGB(255, 122, 152),
+		aqua = Color3.fromRGB(110, 224, 234),
+		violet = Color3.fromRGB(178, 152, 255),
+		pinkHover = Color3.fromRGB(255, 168, 194),
+		creamHover = Color3.fromRGB(50, 52, 88),
+		knob = Color3.fromRGB(244, 236, 248),
+		onPink = INK,
+	},
+}
+local currentTheme = "light"
+local function tc(key)
+	return THEMES[currentTheme][key] or THEMES.light[key]
+end
+
+local bindings = setmetatable({}, { __mode = "k" })
+local THEMED_PROPS = {
+	BackgroundColor3 = true, TextColor3 = true, TextStrokeColor3 = true,
+	Color = true, ScrollBarImageColor3 = true, PlaceholderColor3 = true,
+}
+local LOOKUP = {
+	{ INK, "ink" }, { CREAM, "cream" }, { PINK, "pink" }, { TEAL, "teal" },
+	{ COLORS.muted, "muted" }, { COLORS.off, "off" }, { COLORS.bg, "bg" },
+	{ Color3.new(1, 1, 1), "white" }, { COLORS.green, "green" }, { COLORS.red, "red" },
+	{ THEMES.light.rose, "rose" }, { THEMES.light.aqua, "aqua" }, { THEMES.light.violet, "violet" },
+}
+local function keyForColor(c, prop)
+	for _, e in ipairs(LOOKUP) do
+		if e[1] == c then
+			local base = e[2]
+			if base == "ink" or base == "cream" then
+				local kind = prop == "TextColor3" and "t" or (prop == "TextStrokeColor3" and "s" or "b")
+				return base .. "_" .. kind
+			end
+			return base
+		end
+	end
+	return nil
+end
+registerThemed = function(obj, prop, color)
+	if not THEMED_PROPS[prop] then return end
+	if prop == "Color" and not obj:IsA("UIStroke") then return end
+	local key = keyForColor(color, prop)
+	if key then
+		bindings[obj] = bindings[obj] or {}
+		bindings[obj][prop] = key
+	end
+end
+
+local function paint(obj, prop, key, dur)
+	bindings[obj] = bindings[obj] or {}
+	bindings[obj][prop] = key
+	local col = tc(key)
+	if dur and dur > 0 then
+		tween(obj, dur, { [prop] = col })
+	else
+		obj[prop] = col
+	end
+end
+
+local setTheme
+local darkSwitch
+
+local FONT_TITLE = Enum.Font.FredokaOne
+local FONT_BODY = Enum.Font.Nunito
+
+local WIDTH, HEIGHT, HEADER_H, FOOTER_H = 340, 440, 58, 34
+local curHeight = HEIGHT
+
+local gui = create("ScreenGui", {
+	Name = "GrindBrawlUI",
+	ResetOnSpawn = false,
+	IgnoreGuiInset = true,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+}, playerGui)
+
+local mixValue = create("NumberValue", { Value = 0 }, gui)
+
+local root = create("Frame", {
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.fromOffset(WIDTH, HEIGHT),
+	BackgroundTransparency = 1,
+}, gui)
+local scaler = create("UIScale", { Scale = 1 }, root)
+
+local function fitScale()
+	local cam = workspace.CurrentCamera
+	local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
+	return math.clamp(math.min(vp.X / (WIDTH + 30), vp.Y / (HEIGHT + 30)), 0.55, 1)
+end
+
+local shadow = create("Frame", {
+	Position = UDim2.fromOffset(6, 8),
+	Size = UDim2.fromScale(1, 1),
+	BackgroundColor3 = INK,
+	BackgroundTransparency = 0.2,
+	BorderSizePixel = 0,
+	ZIndex = 0,
+}, root)
+create("UICorner", { CornerRadius = UDim.new(0, 22) }, shadow)
+
+local window = create("CanvasGroup", {
+	Size = UDim2.fromScale(1, 1),
+	BackgroundColor3 = COLORS.bg,
+	BorderSizePixel = 0,
+	Active = true,
+	ZIndex = 1,
+}, root)
+create("UICorner", { CornerRadius = UDim.new(0, 22) }, window)
+local windowStroke = create("UIStroke", { Color = INK, Thickness = 3 }, window)
+bindings[windowStroke] = nil
+
+local pixelLayer = create("Frame", {
+	Size = UDim2.fromScale(1, 1),
+	BackgroundTransparency = 1,
+	ZIndex = 1,
+}, window)
+
+local realImage = create("ImageLabel", {
+	Size = UDim2.fromScale(1, 1),
+	BackgroundTransparency = 1,
+	Image = "",
+	ScaleType = Enum.ScaleType.Crop,
+	Visible = false,
+	ZIndex = 1,
+}, window)
+
+local veil = create("Frame", {
+	Size = UDim2.fromScale(1, 1),
+	BackgroundColor3 = CREAM,
+	BorderSizePixel = 0,
+	ZIndex = 2,
+}, window)
+local veilGradient = create("UIGradient", {
+	Rotation = 90,
+	Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.55),
+		NumberSequenceKeypoint.new(1, 0.9),
+	}),
+}, veil)
+
+local dim = create("Frame", {
+	Size = UDim2.fromScale(1, 1),
+	BackgroundColor3 = Color3.fromRGB(12, 10, 28),
+	BackgroundTransparency = 1,
+	BorderSizePixel = 0,
+	ZIndex = 2,
+}, window)
+
+do
+	local rng = Random.new(7)
+	local glyphs = { "✨", "✨", "💫", "✨", "⭐" }
+	for i = 1, 9 do
+		local s = create("TextLabel", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(rng:NextNumber(0.06, 0.94), rng:NextNumber(0.05, 0.95)),
+			Size = UDim2.fromOffset(20, 20),
+			BackgroundTransparency = 1,
+			Text = glyphs[(i % #glyphs) + 1],
+			TextSize = rng:NextInteger(10, 17),
+			TextTransparency = 0.15,
+			ZIndex = 2,
+		}, window)
+		TweenService:Create(s, TweenInfo.new(rng:NextNumber(1.1, 2.6), Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true, rng:NextNumber(0, 2)), {
+			TextTransparency = 0.95,
+		}):Play()
+	end
+end
+
+local header = create("Frame", {
+	Size = UDim2.new(1, 0, 0, HEADER_H),
+	BackgroundTransparency = 1,
+	Active = true,
+	ZIndex = 3,
+}, window)
+
+local avatar = create("CanvasGroup", {
+	Position = UDim2.fromOffset(14, 9),
+	Size = UDim2.fromOffset(40, 40),
+	BackgroundColor3 = CREAM,
+	BorderSizePixel = 0,
+}, header)
+create("UICorner", { CornerRadius = UDim.new(1, 0) }, avatar)
+create("UIStroke", { Color = INK, Thickness = 2.5 }, avatar)
+local avatarPixels = create("Frame", {
+	Size = UDim2.fromScale(1, 1),
+	BackgroundTransparency = 1,
+}, avatar)
+
+local letters = {}
+do
+	local TITLE = "GRIND BRAWL"
+	local letterHolder = create("Frame", {
+		Position = UDim2.fromOffset(64, 7),
+		Size = UDim2.new(1, -170, 0, 30),
+		BackgroundTransparency = 1,
+	}, header)
+	local x = 0
+	local cols = { CREAM, PINK, TEAL }
+	for i = 1, #TITLE do
+		local ch = TITLE:sub(i, i)
+		if ch == " " then
+			x += 9
+		else
+			local lbl = create("TextLabel", {
+				Position = UDim2.fromOffset(x, 0),
+				Size = UDim2.fromOffset(17, 30),
+				BackgroundTransparency = 1,
+				Text = ch,
+				TextColor3 = cols[(i % 3) + 1],
+				TextStrokeColor3 = INK,
+				TextStrokeTransparency = 0,
+				TextSize = 23,
+				Font = FONT_TITLE,
+			}, letterHolder)
+			letters[#letters + 1] = { lbl = lbl, x = x, i = i }
+			x += 17
+		end
+	end
+end
+
+create("TextLabel", {
+	Position = UDim2.fromOffset(64, 37),
+	Size = UDim2.new(1, -170, 0, 14),
+	BackgroundTransparency = 1,
+	Text = "~ rep farm • brawl • gains ~",
+	TextColor3 = INK,
+	TextStrokeColor3 = CREAM,
+	TextStrokeTransparency = 0.35,
+	TextSize = 11,
+	Font = FONT_BODY,
+	TextXAlignment = Enum.TextXAlignment.Left,
+}, header)
+
+do
+	local animAccum = 0
+	track(RunService.Heartbeat:Connect(function(dt)
+		if not gui.Enabled then return end
+		animAccum += dt
+		if animAccum < 1 / 30 then return end
+		animAccum = 0
+		local t = os.clock()
+
+		veilGradient.Rotation = 90 + math.sin(t * 0.5) * 28
+		avatar.Rotation = math.sin(t * 1.8) * 5
+		if mixValue.Value > 0.001 then
+			local neon = PINK:Lerp(TEAL, (math.sin(t * 1.6) + 1) / 2)
+			windowStroke.Color = THEMES.light.ink_b:Lerp(neon, mixValue.Value)
+		else
+			windowStroke.Color = THEMES.light.ink_b
+		end
+		for _, l in ipairs(letters) do
+			l.lbl.Position = UDim2.fromOffset(l.x, math.sin(t * 4 + l.i * 0.7) * 2.5)
+			l.lbl.Rotation = math.sin(t * 3 + l.i) * 4
+		end
+	end))
+end
+
+local function headerButton(text, offsetX, hoverKey)
+	local btn = create("TextButton", {
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, offsetX, 0.5, 0),
+		Size = UDim2.fromOffset(28, 28),
+		BackgroundColor3 = CREAM,
+		Text = text,
+		TextColor3 = INK,
+		TextSize = 17,
+		Font = FONT_TITLE,
+		AutoButtonColor = false,
+	}, header)
+	create("UICorner", { CornerRadius = UDim.new(1, 0) }, btn)
+	create("UIStroke", { Color = INK, Thickness = 2 }, btn)
+	local grow = create("UIScale", { Scale = 1 }, btn)
+	btn.MouseEnter:Connect(function()
+		paint(btn, "BackgroundColor3", hoverKey, 0.15)
+		paint(btn, "TextColor3", "onPink", 0.15)
+		tween(grow, 0.2, { Scale = 1.12 }, Enum.EasingStyle.Back)
+	end)
+	btn.MouseLeave:Connect(function()
+		paint(btn, "BackgroundColor3", "cream_b", 0.15)
+		paint(btn, "TextColor3", "ink_t", 0.15)
+		tween(grow, 0.2, { Scale = 1 })
+	end)
+	return btn
+end
+local closeBtn = headerButton("×", -14, "pink")
+local minBtn = headerButton("–", -48, "teal")
+local themeBtn = headerButton("🌙", -82, "teal")
+
+do
+	local dragging, dragStart, startPos, dragInput
+	header.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging, dragStart, startPos = true, input.Position, root.Position
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then dragging = false end
+			end)
+		end
+	end)
+	header.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+			dragInput = input
+		end
+	end)
+	track(UserInputService.InputChanged:Connect(function(input)
+		if dragging and input == dragInput then
+			local delta = (input.Position - dragStart) / scaler.Scale
+			root.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+		end
+	end))
+end
+
+local footer = create("Frame", {
+	AnchorPoint = Vector2.new(0, 1),
+	Position = UDim2.new(0, 0, 1, 0),
+	Size = UDim2.new(1, 0, 0, FOOTER_H),
+	BackgroundTransparency = 1,
+	ZIndex = 3,
+}, window)
+local footerLabel = create("TextLabel", {
+	Size = UDim2.new(1, 0, 1, -12),
+	BackgroundTransparency = 1,
+	Text = "Ping -- ms   •   FPS --",
+	TextColor3 = INK,
+	TextStrokeColor3 = CREAM,
+	TextStrokeTransparency = 0.3,
+	TextSize = 11,
+	Font = FONT_TITLE,
+}, footer)
+
+do
+	local MIN_HEIGHT = 300
+	local grip = create("TextButton", {
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.new(0.5, 0, 1, 0),
+		Size = UDim2.new(1, 0, 0, 18),
+		BackgroundTransparency = 1,
+		Text = "",
+		AutoButtonColor = false,
+		ZIndex = 5,
+	}, footer)
+	local pill = create("Frame", {
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.new(0.5, 0, 1, -6),
+		Size = UDim2.fromOffset(54, 6),
+		BackgroundColor3 = PINK,
+		BorderSizePixel = 0,
+		ZIndex = 5,
+	}, grip)
+	create("UICorner", { CornerRadius = UDim.new(1, 0) }, pill)
+	create("UIStroke", { Color = INK, Thickness = 1.5 }, pill)
+
+	local resizing, startY, startH, startPos, dragInput
+	local function relax()
+		paint(pill, "BackgroundColor3", "pink", 0.15)
+		tween(pill, 0.15, { Size = UDim2.fromOffset(54, 6) })
+	end
+	grip.MouseEnter:Connect(function()
+		if not resizing then tween(pill, 0.15, { Size = UDim2.fromOffset(72, 7) }, Enum.EasingStyle.Back) end
+	end)
+	grip.MouseLeave:Connect(function()
+		if not resizing then tween(pill, 0.15, { Size = UDim2.fromOffset(54, 6) }) end
+	end)
+	grip.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			resizing, startY, startH, startPos = true, input.Position.Y, curHeight, root.Position
+			paint(pill, "BackgroundColor3", "teal", 0.1)
+			tween(pill, 0.15, { Size = UDim2.fromOffset(72, 7) }, Enum.EasingStyle.Back)
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					resizing = false
+					relax()
+				end
+			end)
+		end
+	end)
+	grip.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+			dragInput = input
+		end
+	end)
+	track(UserInputService.InputChanged:Connect(function(input)
+		if resizing and input == dragInput then
+			local s = scaler.Scale
+			local cam = workspace.CurrentCamera
+			local vpY = cam and cam.ViewportSize.Y or 720
+			local maxH = math.max(MIN_HEIGHT, math.floor((vpY - 30) / s))
+			local newH = math.clamp(startH + (input.Position.Y - startY) / s, MIN_HEIGHT, maxH)
+			curHeight = newH
+			root.Size = UDim2.fromOffset(WIDTH, newH)
+			root.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset, startPos.Y.Scale, startPos.Y.Offset + (newH - startH) * s / 2)
+		end
+	end))
+end
+
+local body = create("Frame", {
+	Position = UDim2.new(0, 12, 0, HEADER_H + 4),
+	Size = UDim2.new(1, -24, 1, -(HEADER_H + 4 + FOOTER_H)),
+	BackgroundTransparency = 1,
+	ZIndex = 3,
+}, window)
+
+local TAB_COUNT = 4
+
+local tabBar = create("Frame", {
+	Size = UDim2.new(1, 0, 0, 38),
+	BackgroundColor3 = CREAM,
+	BorderSizePixel = 0,
+}, body)
+create("UICorner", { CornerRadius = UDim.new(0, 15) }, tabBar)
+create("UIStroke", { Color = INK, Thickness = 2 }, tabBar)
+
+local indicator = create("Frame", {
+	Position = UDim2.new(0, 3, 0, 3),
+	Size = UDim2.new(1 / TAB_COUNT, -6, 1, -6),
+	BackgroundColor3 = INK,
+	BorderSizePixel = 0,
+}, tabBar)
+create("UICorner", { CornerRadius = UDim.new(0, 12) }, indicator)
+
+local pageHolder = create("Frame", {
+	Position = UDim2.new(0, 0, 0, 46),
+	Size = UDim2.new(1, 0, 1, -46),
+	BackgroundTransparency = 1,
+	ClipsDescendants = true,
+}, body)
+
+local tabs = {}
+local currentTab
+
+local function selectTab(name, instant)
+	local idx = tabs[name].index
+	local prev = currentTab and tabs[currentTab]
+	local dir = (prev and idx < prev.index) and -1 or 1
+	currentTab = name
+	for tabName, t in pairs(tabs) do
+		local on = tabName == name
+		paint(t.button, "TextColor3", on and "cream_t" or "ink_t", 0.2)
+		if on then
+			t.page.Visible = true
+			if instant then
+				t.page.Position = UDim2.new()
+				t.page.GroupTransparency = 0
+			else
+				t.page.Position = UDim2.new(0, 28 * dir, 0, 6)
+				t.page.GroupTransparency = 1
+				tween(t.page, 0.38, { Position = UDim2.new() }, Enum.EasingStyle.Back)
+				tween(t.page, 0.28, { GroupTransparency = 0 })
+			end
+		elseif t.page.Visible then
+			if instant then
+				t.page.Visible = false
+			else
+				local pg = t.page
+				tween(pg, 0.14, { GroupTransparency = 1, Position = UDim2.new(0, -18 * dir, 0, 0) })
+				task.delay(0.15, function()
+					if currentTab ~= tabName then pg.Visible = false end
+				end)
+			end
+		end
+	end
+	tween(indicator, 0.32, { Position = UDim2.new((idx - 1) / TAB_COUNT, 3, 0, 3) }, Enum.EasingStyle.Back)
+end
+
+local tabCount = 0
+local function newTab(name, label)
+	tabCount += 1
+
+	local wrapper = create("CanvasGroup", {
+		Size = UDim2.new(1, 0, 1, 0),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		Visible = false,
+	}, pageHolder)
+	local page = create("ScrollingFrame", {
+		Size = UDim2.new(1, 0, 1, 0),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 3,
+		ScrollBarImageColor3 = INK,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+	}, wrapper)
+	create("UIPadding", {
+		PaddingRight = UDim.new(0, 6), PaddingBottom = UDim.new(0, 8),
+		PaddingLeft = UDim.new(0, 2), PaddingTop = UDim.new(0, 2),
+	}, page)
+	create("UIListLayout", { Padding = UDim.new(0, 9), SortOrder = Enum.SortOrder.LayoutOrder }, page)
+
+	local button = create("TextButton", {
+		Position = UDim2.new((tabCount - 1) / TAB_COUNT, 0, 0, 0),
+		Size = UDim2.new(1 / TAB_COUNT, 0, 1, 0),
+		BackgroundTransparency = 1,
+		Text = label,
+		TextColor3 = INK,
+		TextSize = 12,
+		Font = FONT_TITLE,
+		AutoButtonColor = false,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		ZIndex = 2,
+	}, tabBar)
+	button.Activated:Connect(function() selectTab(name) end)
+
+	tabs[name] = { page = wrapper, button = button, index = tabCount }
+	return page
+end
+
+local colFarm = newTab("Farm", "🌺 Farm")
+local colBrawl = newTab("Brawl", "🥊 Brawl")
+local colStats = newTab("Gains", "✨ Gains")
+local colCfg = newTab("Config", "⚙️ Config")
+selectTab("Farm", true)
+
+local parentFrame = colFarm
+
+local order = 0
+local function nextOrder()
+	order += 1
+	return order
+end
+
+-- Registry of every control that can be saved to / loaded from the config
+local controls = {}
+
+local function sectionLabel(text)
+	local holder = create("Frame", {
+		LayoutOrder = nextOrder(),
+		Size = UDim2.new(1, 0, 0, 22),
+		BackgroundTransparency = 1,
+	}, parentFrame)
+	local tag = create("TextLabel", {
+		Size = UDim2.new(0, 0, 1, 0),
+		AutomaticSize = Enum.AutomaticSize.X,
+		BackgroundColor3 = INK,
+		BorderSizePixel = 0,
+		Text = text,
+		TextColor3 = CREAM,
+		TextSize = 12,
+		Font = FONT_TITLE,
+	}, holder)
+	create("UICorner", { CornerRadius = UDim.new(1, 0) }, tag)
+	create("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12) }, tag)
+end
+
+local function makeRow(height)
+	local row = create("Frame", {
+		LayoutOrder = nextOrder(),
+		Size = UDim2.new(1, 0, 0, height or 40),
+		BackgroundColor3 = CREAM,
+		BackgroundTransparency = 0.06,
+		BorderSizePixel = 0,
+	}, parentFrame)
+	create("UICorner", { CornerRadius = UDim.new(0, 14) }, row)
+	create("UIStroke", { Color = INK, Thickness = 2 }, row)
+	return row
+end
+
+local function addSwitch(text, default, callback, key)
+	local row = makeRow(42)
+	create("TextLabel", {
+		Position = UDim2.new(0, 14, 0, 0),
+		Size = UDim2.new(1, -86, 1, 0),
+		BackgroundTransparency = 1,
+		Text = text,
+		TextColor3 = INK,
+		TextSize = 14,
+		Font = FONT_TITLE,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, row)
+	local track_ = create("TextButton", {
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -12, 0.5, 0),
+		Size = UDim2.fromOffset(52, 28),
+		BackgroundColor3 = COLORS.off,
+		Text = "",
+		AutoButtonColor = false,
+	}, row)
+	create("UICorner", { CornerRadius = UDim.new(1, 0) }, track_)
+	create("UIStroke", { Color = INK, Thickness = 2 }, track_)
+	local knob = create("Frame", {
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, 3, 0.5, 0),
+		Size = UDim2.fromOffset(22, 22),
+		BackgroundColor3 = CREAM,
+		BorderSizePixel = 0,
+	}, track_)
+	paint(knob, "BackgroundColor3", "knob")
+	create("UICorner", { CornerRadius = UDim.new(1, 0) }, knob)
+	create("UIStroke", { Color = INK, Thickness = 2 }, knob)
+	local eyes = {}
+	for i = 1, 2 do
+		local eye = create("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.new(i == 1 and 0.32 or 0.68, 0, 0.45, 0),
+			Size = UDim2.fromOffset(4, 1),
+			BackgroundColor3 = INK,
+			BorderSizePixel = 0,
+		}, knob)
+		create("UICorner", { CornerRadius = UDim.new(1, 0) }, eye)
+		eyes[i] = eye
+	end
+	local value = false
+	local function set(v, fire)
+		value = v and true or false
+		if fire then
+			tween(knob, 0.1, { Size = UDim2.fromOffset(27, 20) })
+			task.delay(0.1, function()
+				tween(knob, 0.25, { Size = UDim2.fromOffset(22, 22) }, Enum.EasingStyle.Back)
+			end)
+		end
+		tween(knob, 0.25, { Position = value and UDim2.new(1, -25, 0.5, 0) or UDim2.new(0, 3, 0.5, 0) }, Enum.EasingStyle.Back)
+		paint(track_, "BackgroundColor3", value and "pink" or "off", 0.2)
+		for _, e in ipairs(eyes) do
+			tween(e, 0.2, { Size = value and UDim2.fromOffset(4, 5) or UDim2.fromOffset(4, 1) })
+		end
+		if fire and callback then callback(value) end
+	end
+	track_.Activated:Connect(function() set(not value, true) end)
+	set(default, false)
+	local ctl = { Set = function(_, v, silent) set(v, not silent) end, Get = function() return value end }
+	if key then controls[#controls + 1] = { key = key, kind = "switch", ctl = ctl } end
+	return ctl
+end
+
+local function addBox(text, placeholder, callback, key)
+	local row = makeRow(42)
+	create("TextLabel", {
+		Position = UDim2.new(0, 14, 0, 0),
+		Size = UDim2.new(0.55, -14, 1, 0),
+		BackgroundTransparency = 1,
+		Text = text,
+		TextColor3 = INK,
+		TextSize = 13,
+		Font = FONT_TITLE,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextWrapped = true,
+	}, row)
+	local box = create("TextBox", {
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -10, 0.5, 0),
+		Size = UDim2.new(0.37, 0, 0, 28),
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		Text = "",
+		PlaceholderText = placeholder,
+		PlaceholderColor3 = COLORS.muted,
+		TextColor3 = INK,
+		TextSize = 13,
+		Font = FONT_BODY,
+		ClearTextOnFocus = false,
+	}, row)
+	create("UICorner", { CornerRadius = UDim.new(0, 10) }, box)
+	local stroke = create("UIStroke", { Color = INK, Thickness = 2 }, box)
+	box.Focused:Connect(function() paint(stroke, "Color", "pink", 0.15) end)
+	box.FocusLost:Connect(function()
+		paint(stroke, "Color", "ink_b", 0.15)
+		callback(box.Text)
+	end)
+	local ctl = {
+		Box = box,
+		Set = function(_, v)
+			box.Text = tostring(v)
+			callback(box.Text)
+		end,
+		Get = function() return box.Text end,
+	}
+	if key then controls[#controls + 1] = { key = key, kind = "box", ctl = ctl } end
+	return ctl
+end
+
+local function addLabel(text, size, color)
+	return create("TextLabel", {
+		LayoutOrder = nextOrder(),
+		Size = UDim2.new(1, 0, 0, size or 20),
+		BackgroundTransparency = 1,
+		Text = text,
+		TextColor3 = color or INK,
+		TextStrokeColor3 = CREAM,
+		TextStrokeTransparency = 0.45,
+		TextSize = 12,
+		TextWrapped = true,
+		Font = FONT_BODY,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+	}, parentFrame)
+end
+
+local function addButton(text, callback, primary)
+	local row = makeRow(38)
+	row.BackgroundTransparency = 0
+	local baseKey = primary and "pink" or "cream_b"
+	paint(row, "BackgroundColor3", baseKey)
+	local press = create("UIScale", { Scale = 1 }, row)
+	local btn = create("TextButton", {
+		Size = UDim2.new(1, 0, 1, 0),
+		BackgroundTransparency = 1,
+		Text = text,
+		TextColor3 = INK,
+		TextSize = 14,
+		Font = FONT_TITLE,
+		AutoButtonColor = false,
+	}, row)
+	local hovering = false
+	if primary then paint(btn, "TextColor3", "onPink") end
+	btn.MouseEnter:Connect(function()
+		hovering = true
+		paint(row, "BackgroundColor3", primary and "pinkHover" or "creamHover", 0.15)
+		tween(press, 0.2, { Scale = 1.03 }, Enum.EasingStyle.Back)
+	end)
+	btn.MouseLeave:Connect(function()
+		hovering = false
+		paint(row, "BackgroundColor3", baseKey, 0.15)
+		tween(press, 0.2, { Scale = 1 })
+	end)
+	btn.Activated:Connect(function()
+		press.Scale = 0.94
+		tween(press, 0.3, { Scale = hovering and 1.03 or 1 }, Enum.EasingStyle.Back)
+		callback()
+	end)
+	return btn
+end
+
+local function addTextRow(initial, height)
+	local row = makeRow(height or 32)
+	return create("TextLabel", {
+		Position = UDim2.new(0, 14, 0, 0),
+		Size = UDim2.new(1, -28, 1, 0),
+		BackgroundTransparency = 1,
+		Text = initial,
+		TextColor3 = INK,
+		TextSize = 13,
+		TextWrapped = true,
+		Font = FONT_BODY,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, row)
+end
+
+local function addStatusPill(initial)
+	local row = makeRow(46)
+	local ring = create("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0, 24, 0.5, 0),
+		Size = UDim2.fromOffset(12, 12),
+		BackgroundTransparency = 1,
+	}, row)
+	create("UICorner", { CornerRadius = UDim.new(1, 0) }, ring)
+	local ringStroke = create("UIStroke", { Color = COLORS.muted, Thickness = 2, Transparency = 0.2 }, ring)
+	TweenService:Create(ring, TweenInfo.new(1.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, -1), { Size = UDim2.fromOffset(26, 26) }):Play()
+	TweenService:Create(ringStroke, TweenInfo.new(1.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, -1), { Transparency = 1 }):Play()
+	local dot = create("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0, 24, 0.5, 0),
+		Size = UDim2.fromOffset(12, 12),
+		BackgroundColor3 = COLORS.muted,
+		BorderSizePixel = 0,
+	}, row)
+	create("UICorner", { CornerRadius = UDim.new(1, 0) }, dot)
+	create("UIStroke", { Color = INK, Thickness = 2 }, dot)
+	local label = create("TextLabel", {
+		Position = UDim2.new(0, 46, 0, 0),
+		Size = UDim2.new(1, -56, 1, 0),
+		BackgroundTransparency = 1,
+		Text = initial,
+		TextColor3 = INK,
+		TextSize = 13,
+		TextWrapped = true,
+		Font = FONT_BODY,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, row)
+	return dot, label, ringStroke
+end
+
+local function makeGrid()
+	local grid = create("Frame", {
+		LayoutOrder = nextOrder(),
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+	}, parentFrame)
+	create("UIGridLayout", {
+		CellSize = UDim2.new(0.5, -5, 0, 72),
+		CellPadding = UDim2.fromOffset(9, 9),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	}, grid)
+	return grid
+end
+
+-- Setters skip the write when nothing changed (cheaper on the 0.5s stats loop)
+local function addTile(grid, name, valueColor, icon)
+	local tile = create("Frame", {
+		LayoutOrder = nextOrder(),
+		BackgroundColor3 = CREAM,
+		BackgroundTransparency = 0.06,
+		BorderSizePixel = 0,
+	}, grid)
+	create("UICorner", { CornerRadius = UDim.new(0, 14) }, tile)
+	create("UIStroke", { Color = INK, Thickness = 2 }, tile)
+	create("TextLabel", {
+		Position = UDim2.new(0, 11, 0, 7),
+		Size = UDim2.new(1, -36, 0, 14),
+		BackgroundTransparency = 1,
+		Text = string.upper(name),
+		TextColor3 = COLORS.muted,
+		TextSize = 11,
+		Font = FONT_TITLE,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, tile)
+	if icon then
+		create("TextLabel", {
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.new(1, -8, 0, 5),
+			Size = UDim2.fromOffset(20, 20),
+			BackgroundTransparency = 1,
+			Text = icon,
+			TextSize = 15,
+		}, tile)
+	end
+	local value = create("TextLabel", {
+		Position = UDim2.new(0, 11, 0, 25),
+		Size = UDim2.new(1, -20, 0, 24),
+		BackgroundTransparency = 1,
+		Text = "--",
+		TextColor3 = valueColor or INK,
+		TextSize = 20,
+		Font = FONT_TITLE,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+	}, tile)
+	local sub = create("TextLabel", {
+		Position = UDim2.new(0, 11, 0, 50),
+		Size = UDim2.new(1, -20, 0, 14),
+		BackgroundTransparency = 1,
+		Text = "",
+		TextColor3 = COLORS.muted,
+		TextSize = 11,
+		Font = FONT_BODY,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+	}, tile)
+	return function(text) if value.Text ~= text then value.Text = text end end,
+		function(text) if sub.Text ~= text then sub.Text = text end end
+end
+
+------------------------------------------------------------------------
+-- BRAWL TAB: status pill
+------------------------------------------------------------------------
+parentFrame = colBrawl
+sectionLabel("🥊 AUTO BRAWL")
+local statusDot, statusText, statusRing = addStatusPill("idle")
+local function setStatus(text, color)
+	statusText.Text = text
+	local key = keyForColor(color or COLORS.muted, "TextColor3") or "muted"
+	paint(statusDot, "BackgroundColor3", key, 0.2)
+	paint(statusRing, "Color", key, 0.2)
+	statusText.TextTransparency = 0.7
+	tween(statusText, 0.3, { TextTransparency = 0 })
+end
+
+------------------------------------------------------------------------
+-- Ping helpers
+------------------------------------------------------------------------
+local pingStatusLabel
+
+local function readPingStat(stat)
+	if not stat then return nil end
+	local ok, value = pcall(function() return stat:GetValue() end)
+	if ok and type(value) == "number" and value >= 0 then return value end
+	local okString, valueString = pcall(function() return stat:GetValueString() end)
+	if okString and type(valueString) == "string" then
+		local number = tonumber(valueString:match("([%d%.]+)"))
+		if number then return number end
+	end
+	return nil
+end
+
+local pingStat, lastPingRead = nil, 0
+
+local function findPingStat()
+	local network = Stats:FindFirstChild("Network")
+	local serverStats = network and network:FindFirstChild("ServerStatsItem")
+	local performance = Stats:FindFirstChild("PerformanceStats")
+	local candidates = {}
+	if serverStats then
+		candidates[#candidates + 1] = serverStats:FindFirstChild("Data Ping")
+		candidates[#candidates + 1] = serverStats:FindFirstChild("Ping")
+	end
+	if performance then
+		candidates[#candidates + 1] = performance:FindFirstChild("Ping")
+	end
+	for _, stat in ipairs(candidates) do
+		local value = readPingStat(stat)
+		if value then
+			ping.last = value
+			return stat
+		end
+	end
+	return nil
+end
+
+local function getPing()
+	local now = os.clock()
+	if now - lastPingRead < 0.25 then return ping.last end
+	lastPingRead = now
+	if pingStat then
+		local value = readPingStat(pingStat)
+		if value then
+			ping.last = value
+		else
+			pingStat = nil
+		end
+	end
+	if not pingStat then pingStat = findPingStat() end
+	return ping.last
+end
+
+local function updatePingStatus(text)
+	if pingStatusLabel then
+		local s = string.format("Ping: %d ms | %s", math.floor(getPing() + 0.5), text)
+		if pingStatusLabel.Text ~= s then pingStatusLabel.Text = s end
+	end
+end
+
+local function waitForPingRecovery()
+	if ping.pauseDuration > 0 then
+		local finish = os.clock() + ping.pauseDuration
+		while state.fastRep and ping.enabled and os.clock() < finish do
+			updatePingStatus("Paused - cooldown")
+			task.wait(0.1)
+		end
+	end
+	while state.fastRep and ping.enabled do
+		if getPing() < ping.resumePing then break end
+		updatePingStatus("Paused - waiting for recovery")
+		task.wait(0.15)
+	end
+	if state.fastRep then
+		updatePingStatus(ping.enabled and "Running" or "Ping adjuster off")
+	end
+end
+
+------------------------------------------------------------------------
+-- Fast rep
+------------------------------------------------------------------------
+local lastSeatCheck, unseatedSince = 0, nil
+local function seatWatchdog()
+	if os.clock() - lastSeatCheck < 1 then return end
+	lastSeatCheck = os.clock()
+	local hum, hrp = getHumanoid(), getRoot()
+	if not (hum and hrp) or hum.Health <= 0 then
+		unseatedSince = nil
+		return
+	end
+	if hum.Sit or hum.SeatPart ~= nil then
+		state.seatedSeen = true
+		state.lastSeatCF = hrp.CFrame
+		unseatedSince = nil
+		return
+	end
+	if not (state.keepSeated and state.seatedSeen) then return end
+	unseatedSince = unseatedSince or os.clock()
+	if os.clock() - unseatedSince < 3 then return end
+	updatePingStatus("Off the weight - sitting back down")
+	local spot = (state.manualOrigin and state.origin) or state.lastSeatCF or state.origin
+	if spot and (hrp.Position - spot.Position).Magnitude > CONFIG.ReturnTolerance then
+		pcall(function()
+			hrp.CFrame = spot
+			hrp.Velocity = Vector3.zero
+		end)
+		task.wait(0.4)
+	end
+	pressE()
+	unseatedSince = os.clock() - 1.5
+end
+
+local function fastRepLoop()
+	if state.repLoopActive then return end
+	state.repLoopActive = true
+	local staleSince
+	local function step()
+		if state.brawlBusy then
+			if state.brawlActive then
+				staleSince = nil
+				if state.brawlStartedAt and state.forceFinish
+					and os.clock() - state.brawlStartedAt > CONFIG.MaxBrawlSeconds + 20 then
+					task.spawn(state.forceFinish)
+				end
+			else
+				staleSince = staleSince or os.clock()
+				if os.clock() - staleSince > 15 then
+					state.brawlBusy = false
+					staleSince = nil
+				end
+			end
+			updatePingStatus("Paused - brawl")
+			task.wait(0.2)
+			return
+		end
+		staleSince = nil
+		if ping.enabled and getPing() >= ping.pausePing then
+			updatePingStatus("Paused - high ping")
+			waitForPingRecovery()
+			return
+		end
+		seatWatchdog()
+		updatePingStatus(ping.enabled and "Running" or "Ping adjuster off")
+		local batchStart = os.clock()
+		while state.fastRep and not state.brawlBusy and os.clock() - batchStart < 0.05 do
+			if ping.enabled and getPing() >= ping.pausePing then break end
+			for _ = 1, state.repsPerTick do
+				if not state.fastRep or state.brawlBusy then break end
+				pcall(fireMuscle, muscleEvent, "rep")
+			end
+			task.wait(0.01)
+		end
+		task.wait()
+	end
+	while state.fastRep and gui.Parent do
+		local ok, err = pcall(step)
+		if not ok then
+			warn("[GrindBrawl] fast rep hiccup: " .. tostring(err))
+			task.wait(0.5)
+		end
+	end
+	state.repLoopActive = false
+	updatePingStatus("Stopped")
+end
+
+------------------------------------------------------------------------
+-- FARM TAB
+------------------------------------------------------------------------
+parentFrame = colFarm
+sectionLabel("💪 FAST FARM")
+
+addSwitch("Fast Rep", false, function(on)
+	if on and not fireMuscle then
+		warn("[GrindBrawl] muscleEvent not found - fast rep disabled")
+		updatePingStatus("muscleEvent not found")
+		on = false
+	end
+	state.fastRep = on
+	if on then task.spawn(fastRepLoop) end
+end, "fastRep")
+
+addBox("Rep Speed", "1", function(value)
+	local n = tonumber(value)
+	if n and n > 0 then state.repsPerTick = math.floor(n) end
+end, "repSpeed")
+
+addSwitch("Ping Adjuster", true, function(on)
+	ping.enabled = on
+	if not on then updatePingStatus("Ping adjuster off") end
+end, "pingAdjuster")
+
+addSwitch("Re-sit if knocked off", true, function(on)
+	state.keepSeated = on
+end, "keepSeated")
+
+addLabel("Fast Rep pauses during a brawl and resumes once you're back on your spot.", 34)
+
+local eggStatusLabel
+local function findEgg()
+	local char = player.Character
+	local backpack = player:FindFirstChild("Backpack")
+	local function look(container)
+		if not container then return nil end
+		local exact = container:FindFirstChild("Protein Egg")
+		if exact and exact:IsA("Tool") then return exact end
+		for _, item in ipairs(container:GetChildren()) do
+			if item:IsA("Tool") and string.find(string.lower(item.Name), "egg", 1, true) then
+				return item
+			end
+		end
+		return nil
+	end
+	return look(backpack) or look(char)
+end
+
+local function eatEgg()
+	local egg = findEgg()
+	local hum = getHumanoid()
+	local char = player.Character
+	if not (egg and hum and char) then return false end
+
+	local prevName
+	for _, t in ipairs(char:GetChildren()) do
+		if t:IsA("Tool") and t ~= egg then
+			prevName = t.Name
+			break
+		end
+	end
+	pcall(function() hum:EquipTool(egg) end)
+	local waited = 0
+	while egg.Parent ~= char and waited < 1 do
+		task.wait(0.05)
+		waited += 0.05
+	end
+	pcall(function() egg:Activate() end)
+	task.wait(0.35)
+
+	if egg.Parent == char then
+		pcall(function() hum:UnequipTools() end)
+	end
+	if prevName then
+		local bp = player:FindFirstChild("Backpack")
+		local prev = bp and bp:FindFirstChild(prevName)
+		if prev then pcall(function() hum:EquipTool(prev) end) end
+	end
+	return true
+end
+
+local eggLoopRunning = false
+local function setEggText(s)
+	if eggStatusLabel and eggStatusLabel.Text ~= s then eggStatusLabel.Text = s end
+end
+local function eggLoop()
+	if eggLoopRunning then return end
+	eggLoopRunning = true
+	local nextEat = 0
+	while state.autoEgg and gui.Parent do
+		if state.brawlBusy then
+			setEggText("Egg: waiting for brawl to finish")
+			task.wait(0.5)
+		elseif os.clock() >= nextEat then
+			if eatEgg() then
+				state.eggsEaten += 1
+				nextEat = os.clock() + state.eggInterval
+			else
+				nextEat = os.clock() + 10
+				setEggText("Egg: none in backpack - retrying")
+			end
+			task.wait(0.2)
+		else
+			setEggText(string.format("Egg: eaten %d | next in %s", state.eggsEaten, fmtTime(nextEat - os.clock())))
+			task.wait(0.5)
+		end
+	end
+	eggLoopRunning = false
+	setEggText("Egg: off")
+end
+
+addSwitch("Auto Eat Egg", false, function(on)
+	state.autoEgg = on
+	if on then task.spawn(eggLoop) end
+end, "autoEgg")
+
+addBox("Egg Every (min)", "30", function(value)
+	local n = tonumber(value)
+	if n and n >= 1 then state.eggInterval = n * 60 end
+end, "eggMinutes")
+
+eggStatusLabel = addTextRow("Egg: off")
+
+track(player.Idled:Connect(function()
+	if not state.antiAfk then return end
+	pcall(function()
+		VirtualUser:CaptureController()
+		VirtualUser:ClickButton2(Vector2.new())
+	end)
+end))
+
+addSwitch("Anti-AFK", true, function(on)
+	state.antiAfk = on
+end, "antiAfk")
+
+sectionLabel("📡 PING SETTINGS")
+
+addBox("Pause At Ping (ms)", "250", function(value)
+	local n = tonumber(value)
+	if n and n >= 1 then
+		ping.pausePing = math.floor(n)
+		if ping.resumePing >= ping.pausePing then
+			ping.resumePing = math.max(0, ping.pausePing - 25)
+		end
+	end
+end, "pausePing")
+
+addBox("Resume Below (ms)", "200", function(value)
+	local n = tonumber(value)
+	if n and n >= 0 then
+		ping.resumePing = math.min(math.floor(n), math.max(0, ping.pausePing - 1))
+	end
+end, "resumePing")
+
+addBox("Pause Duration (s)", "1", function(value)
+	local n = tonumber(value)
+	if n and n >= 0 then ping.pauseDuration = n end
+end, "pauseDuration")
+
+pingStatusLabel = addTextRow("Ping: -- ms | Ready")
+
+sectionLabel("🎨 APPEARANCE")
+
+darkSwitch = addSwitch("Dark mode", false, function(on)
+	setTheme(on and "dark" or "light", true)
+end, "dark")
+
+local realBgTried = false
+local function loadRealBackground()
+	if realBgTried then return end
+	realBgTried = true
+	task.spawn(function()
+		local writeFile = writefile
+		local customAsset = getcustomasset or getsynasset
+		local httpRequest = (syn and syn.request) or http_request or request
+		if writeFile and customAsset and httpRequest then
+			local ok = pcall(function()
+				local res = httpRequest({ Url = BG_URL, Method = "GET" })
+				if not (res and res.Body and #res.Body > 200) then error("empty response") end
+				writeFile("grindbrawl_bg.png", res.Body)
+				realImage.Image = customAsset("grindbrawl_bg.png")
+			end)
+			if ok then return end
+		end
+		realImage.Image = BG_IMAGE
+	end)
+end
+
+addSwitch("Pixel Stitch background", true, function(on)
+	pixelLayer.Visible = on
+	realImage.Visible = not on
+	if not on then loadRealBackground() end
+end, "pixelBg")
+
+addBox("Custom Image ID", "decal / image id", function(value)
+	local n = tonumber(value)
+	if n then
+		realImage.Image = "rbxthumb://type=Asset&id=" .. math.floor(n) .. "&w=420&h=420"
+		realBgTried = true
+		pixelLayer.Visible = false
+		realImage.Visible = true
+	end
+end)
+
+------------------------------------------------------------------------
+-- Brawl logic
+------------------------------------------------------------------------
+local function releaseFromMachine(force)
+	local char = player.Character
+	local hum = getHumanoid()
+	local hrp = getRoot()
+	if not (char and hum and hrp) then return end
+	pcall(function()
+		hum.Sit = false
+		hum.PlatformStand = false
+		hrp.Anchored = false
+	end)
+	if force then
+		pcall(function()
+			for _, joint in ipairs(hrp:GetJoints()) do
+				local p0, p1 = joint.Part0, joint.Part1
+				local outside0 = p0 and not p0:IsDescendantOf(char)
+				local outside1 = p1 and not p1:IsDescendantOf(char)
+				if outside0 or outside1 then
+					joint:Destroy()
+				end
+			end
+		end)
+	end
+end
+
+local function doJump()
+	local hum = getHumanoid()
+	if not hum then return end
+	pcall(function()
+		hum.Sit = false
+		hum.Jump = true
+		hum:ChangeState(Enum.HumanoidStateType.Jumping)
+	end)
+end
+
+local function leaveMachineAndJump(token)
+	local function valid()
+		return state.brawlActive and state.brawlToken == token
+	end
+
+	for i = 1, CONFIG.PreJoinJumps do
+		if not valid() then return end
+		releaseFromMachine(i > 1 and isHeldByMachine())
+		doJump()
+		task.wait(CONFIG.PreJoinJumpDelay)
+	end
+
+	local tries = 0
+	while valid() and isHeldByMachine() and tries < CONFIG.PreJoinMaxForce do
+		tries += 1
+		releaseFromMachine(true)
+		doJump()
+		task.wait(0.25)
+	end
+end
+
+local function findPunch()
+	local char = player.Character
+	local backpack = player:FindFirstChild("Backpack")
+	return (char and char:FindFirstChild("Punch")) or (backpack and backpack:FindFirstChild("Punch"))
+end
+
+local function equipPunch()
+	local tool = findPunch()
+	if not tool then return nil end
+	local char = player.Character
+	if char and tool.Parent ~= char then
+		local hum = getHumanoid()
+		if hum then pcall(function() hum:EquipTool(tool) end) end
+		if tool.Parent ~= char then
+			pcall(function() tool.Parent = char end)
+		end
+	end
+	local attackTime = tool:FindFirstChild("attackTime")
+	if attackTime and attackTime:IsA("ValueBase") and attackTime.Value ~= 0 then
+		pcall(function() attackTime.Value = 0 end)
+	end
+	return tool
+end
+
+local function nearestTarget()
+	local hrp = getRoot()
+	if not hrp then return nil end
+	local myPos = hrp.Position
+	local best, bestDist
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= player and plr.Character then
+			local tr = plr.Character:FindFirstChild("HumanoidRootPart")
+			local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+			if tr and hum and hum.Health > 0 then
+				local d = (tr.Position - myPos).Magnitude
+				if d <= CONFIG.ArenaRadius and (not bestDist or d < bestDist) then
+					best, bestDist = plr, d
+				end
+			end
+		end
+	end
+	return best
+end
+
+local function findMain()
+	local name = string.lower(state.mainName or "")
+	if name == "" then return nil end
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= player then
+			if string.lower(plr.Name) == name or string.lower(plr.DisplayName) == name then
+				return plr
+			end
+		end
+	end
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= player and (string.find(string.lower(plr.Name), name, 1, true) or string.find(string.lower(plr.DisplayName), name, 1, true)) then
+			return plr
+		end
+	end
+	return nil
+end
+
+local lastAltTool = 0
+local function altStep()
+	local hum = getHumanoid()
+	if hum and os.clock() - lastAltTool > 1 then
+		lastAltTool = os.clock()
+		pcall(function() hum:UnequipTools() end)
+	end
+	local main = findMain()
+	local mRoot = main and main.Character and main.Character:FindFirstChild("HumanoidRootPart")
+	local hrp = getRoot()
+	if hrp and mRoot and (hrp.Position - mRoot.Position).Magnitude > 6 then
+		pcall(function()
+			hrp.CFrame = CFrame.new(mRoot.Position + mRoot.CFrame.LookVector * 4, mRoot.Position)
+			hrp.Velocity = Vector3.zero
+		end)
+	end
+end
+
+local function hitTarget(target, tool)
+	local hrp = getRoot()
+	local tChar = target.Character
+	local tRoot = tChar and tChar:FindFirstChild("HumanoidRootPart")
+	if not (hrp and tRoot) then return end
+	pcall(function()
+		hrp.CFrame = CFrame.new(tRoot.Position - tRoot.CFrame.LookVector * CONFIG.FollowBehindStuds, tRoot.Position)
+		hrp.Velocity = Vector3.zero
+	end)
+	pcall(fireMuscle, muscleEvent, "punch", "rightHand")
+	pcall(fireMuscle, muscleEvent, "punch", "leftHand")
+	if tool and tool.Parent == player.Character then
+		pcall(function() tool:Activate() end)
+	end
+end
+
+local function returnToSpot()
+	local origin = state.origin
+	if not origin then return end
+	local hum = getHumanoid()
+	if hum then pcall(function() hum:UnequipTools() end) end
+	local deadline = os.clock() + CONFIG.ReturnTimeout
+	local stable = 0
+	while os.clock() < deadline and gui.Parent do
+		local hrp = getRoot()
+		if hrp then
+			if (hrp.Position - origin.Position).Magnitude > CONFIG.ReturnTolerance then
+				pcall(function()
+					hrp.CFrame = origin
+					hrp.Velocity = Vector3.zero
+				end)
+				stable = 0
+			else
+				stable += 1
+			end
+			if stable >= 5 then break end
+		end
+		task.wait(0.1)
+	end
+	local h = getHumanoid()
+	if state.prevTool and h then
+		local bp = player:FindFirstChild("Backpack")
+		local prev = bp and bp:FindFirstChild(state.prevTool)
+		if prev then pcall(function() h:EquipTool(prev) end) end
+	end
+	if state.reSit then
+		local attempts = state.seatedAtStart and 5 or 1
+		for i = 1, attempts do
+			task.wait(i == 1 and 0.3 or 1.2)
+			if i > 1 and isHeldByMachine() then break end
+			pressE()
+		end
+	end
+end
+
+local function finishBrawl(token, reason)
+	if state.brawlToken ~= token or not state.brawlActive then return end
+	state.brawlActive = false
+	setStatus("brawl over (" .. reason .. ") - returning to your spot", COLORS.muted)
+	local ok, err = pcall(returnToSpot)
+	if not ok then warn("[GrindBrawl] return to spot failed: " .. tostring(err)) end
+	state.brawlsDone += 1
+	if state.brawlToken == token then
+		state.brawlBusy = false
+		setStatus(string.format("farming - waiting for next brawl (%d done)", state.brawlsDone), COLORS.green)
+	end
+end
+
+state.forceFinish = function()
+	finishBrawl(state.brawlToken, "watchdog")
+end
+
+local function startBrawl(arena)
+	if not state.autoBrawl or state.brawlActive then return end
+	local hrp = getRoot()
+	if not hrp then return end
+	state.brawlToken += 1
+	local token = state.brawlToken
+	state.brawlActive = true
+	state.brawlBusy = true
+	state.brawlStartedAt = os.clock()
+	state.seatedAtStart = isHeldByMachine()
+	state.prevTool = nil
+	do
+		local char = player.Character
+		if char then
+			for _, t in ipairs(char:GetChildren()) do
+				if t:IsA("Tool") and t.Name ~= "Punch" then
+					state.prevTool = t.Name
+					break
+				end
+			end
+		end
+	end
+	local startPos = hrp.Position
+	if not state.manualOrigin then
+		state.origin = hrp.CFrame
+	end
+
+	task.spawn(function()
+		setStatus("brawl starting (" .. tostring(arena or "?") .. ") - leaving machine", COLORS.text)
+		leaveMachineAndJump(token)
+		if state.brawlToken ~= token or not state.brawlActive then return end
+
+		setStatus("joining brawl", COLORS.text)
+		local joined = false
+		local joinStart = os.clock()
+		while state.brawlActive and state.brawlToken == token and os.clock() - joinStart < CONFIG.JoinTimeout do
+			if isHeldByMachine() then
+				releaseFromMachine(true)
+				doJump()
+			end
+			pcall(fireBrawl, brawlEvent, "joinBrawl")
+			task.wait(CONFIG.JoinRetryDelay)
+			local r = getRoot()
+			if r and (r.Position - startPos).Magnitude >= CONFIG.JoinMovedStuds then
+				joined = true
+				break
+			end
+		end
+		if state.brawlToken ~= token or not state.brawlActive then return end
+		if not joined then
+			finishBrawl(token, "couldn't get into the arena")
+			return
+		end
+
+		setStatus(state.altMode and "in the brawl - alt mode (not attacking)" or "in the brawl - fighting", COLORS.red)
+		local fightStart = os.clock()
+		releaseFromMachine(false)
+		local releaseTries = 0
+		local tool
+		if not state.altMode then tool = equipPunch() end
+		while state.brawlActive and state.brawlToken == token and gui.Parent do
+			if os.clock() - fightStart > CONFIG.MaxBrawlSeconds then
+				finishBrawl(token, "time cap")
+				return
+			end
+			if isHeldByMachine() then
+				releaseTries += 1
+				releaseFromMachine(releaseTries > 3)
+				doJump()
+			end
+			if state.altMode then
+				altStep()
+				task.wait(0.15)
+			else
+				tool = equipPunch()
+				local target = nearestTarget()
+				if target then
+					hitTarget(target, tool)
+				end
+				task.wait(CONFIG.PunchInterval)
+			end
+		end
+	end)
+end
+
+if brawlEvent then
+	track(brawlEvent.OnClientEvent:Connect(function(action, arg)
+		if action == "brawlStarting" then
+			startBrawl(arg)
+		elseif action == "endBrawl" then
+			if state.brawlActive then
+				finishBrawl(state.brawlToken, "endBrawl")
+			end
+		end
+	end))
+end
+
+------------------------------------------------------------------------
+-- BRAWL TAB controls
+------------------------------------------------------------------------
+parentFrame = colBrawl
+
+addSwitch("Auto Brawl", false, function(on)
+	state.autoBrawl = on
+	if on then
+		setStatus(brawlEvent and "waiting for the next brawl" or "brawlEvent not found", brawlEvent and COLORS.green or COLORS.red)
+	elseif state.brawlActive then
+		finishBrawl(state.brawlToken, "turned off")
+	else
+		setStatus("idle", COLORS.muted)
+	end
+end, "autoBrawl")
+
+addSwitch("Press E on return", true, function(on)
+	state.reSit = on
+end, "reSit")
+
+sectionLabel("🎭 ALT MODE")
+
+addSwitch("Alt Mode (don't attack)", false, function(on)
+	state.altMode = on
+end, "altMode")
+
+addBox("Main Account Name", "optional", function(value)
+	state.mainName = (value or ""):match("^%s*(.-)%s*$")
+end, "mainName")
+
+addLabel("Alt Mode: joins brawls but never punches, so your main can kill it. If you enter your main's name, the alt stands next to them.", 48)
+
+sectionLabel("📍 RETURN SPOT")
+
+addButton("📍  Set Return Spot To Here", function()
+	local r = getRoot()
+	if r then
+		state.origin = r.CFrame
+		state.manualOrigin = true
+		setStatus("return spot locked to here", COLORS.green)
+	end
+end, true)
+
+addButton("Use Auto Return Spot", function()
+	state.manualOrigin = false
+	setStatus("return spot will be saved when a brawl starts", COLORS.green)
+end)
+
+addLabel("By default the return spot is wherever you're standing when a brawl starts.", 34)
+
+------------------------------------------------------------------------
+-- GAINS TAB
+------------------------------------------------------------------------
+local sessionStart = os.clock()
+local gainDefs = {
+	{ label = "Strength",   names = { "Strength" },   rate = true },
+	{ label = "Durability", names = { "Durability" }, rate = true },
+	{ label = "Rebirths",   names = { "Rebirths" } },
+	{ label = "Kills",      names = { "Kills" } },
+}
+
+do
+	local function findStatValue(names)
+		local ls = player:FindFirstChild("leaderstats")
+		for _, name in ipairs(names) do
+			local v = ls and ls:FindFirstChild(name)
+			if not (v and v:IsA("ValueBase")) then
+				v = player:FindFirstChild(name, true)
+			end
+			if v and v:IsA("ValueBase") and type(v.Value) == "number" then
+				return v
+			end
+		end
+		return nil
+	end
+
+	local tileStyle = {
+		Strength = { "💪", Color3.fromRGB(226, 72, 112) },
+		Durability = { "🛡️", Color3.fromRGB(36, 156, 168) },
+		Rebirths = { "🔄", Color3.fromRGB(128, 92, 206) },
+		Kills = { "💀", INK },
+	}
+
+	parentFrame = colStats
+	sectionLabel("✨ SESSION GAINS")
+	local grid = makeGrid()
+	local setSession, setSessionSub = addTile(grid, "Session", INK, "🕒")
+	local setBrawls, setBrawlsSub = addTile(grid, "Brawls done", INK, "🥊")
+	setSessionSub("since reset")
+	setBrawlsSub("this session")
+	for _, def in ipairs(gainDefs) do
+		local style = tileStyle[def.label] or { nil, INK }
+		def.setGain, def.setRate = addTile(grid, def.label, style[2], style[1])
+	end
+
+	addButton("↺  Reset Gains", function()
+		sessionStart = os.clock()
+		state.brawlsDone = 0
+		for _, def in ipairs(gainDefs) do def.base = nil end
+	end, true)
+
+	local frameCount = 0
+	track(RunService.RenderStepped:Connect(function() frameCount += 1 end))
+
+	task.spawn(function()
+		local lastT = os.clock()
+		while gui.Parent do
+			local now = os.clock()
+			local elapsed = math.max(now - sessionStart, 1)
+			local fps = frameCount / math.max(now - lastT, 0.001)
+			frameCount = 0
+			lastT = now
+
+			-- Stat lookups are cheap but the UI writes aren't needed while hidden
+			local visible = gui.Enabled
+			for _, def in ipairs(gainDefs) do
+				if def.obj and not def.obj.Parent then def.obj = nil end
+				if not def.obj and now >= (def.nextSearch or 0) then
+					def.obj = findStatValue(def.names)
+					def.nextSearch = now + 3
+				end
+				if def.obj then
+					local cur = def.obj.Value
+					if def.base == nil then def.base = cur end
+					if visible then
+						local gained = cur - def.base
+						def.setGain((gained >= 0 and "+" or "") .. fmt(gained))
+						if def.rate then
+							def.setRate(fmt(gained / elapsed * 3600) .. " /hr")
+						end
+					end
+				elseif visible then
+					def.setGain("n/a")
+				end
+			end
+			if visible then
+				setSession(fmtTime(elapsed))
+				setBrawls(tostring(state.brawlsDone))
+				local text = string.format("Ping %d ms   •   FPS %d   •   RightShift hides", math.floor(getPing() + 0.5), math.floor(fps + 0.5))
+				if footerLabel.Text ~= text then footerLabel.Text = text end
+			end
+			task.wait(0.5)
+		end
+	end)
+end
+
+------------------------------------------------------------------------
+-- CONFIG TAB
+------------------------------------------------------------------------
+local cfgApi = {}
+do
+	local CFG_FILE = "GrindBrawl_config.json"
+	local CFG_VERSION = 1
+	local fileOK = type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function"
+
+	local cfgStatus
+	local function setCfgStatus(text)
+		if cfgStatus and cfgStatus.Text ~= text then cfgStatus.Text = text end
+	end
+
+	-- Storage: real file when the executor has one, otherwise a table that survives re-execution
+	local function readRaw()
+		if fileOK then
+			local ok, res = pcall(function()
+				if isfile(CFG_FILE) then return readfile(CFG_FILE) end
+				return nil
+			end)
+			if ok and type(res) == "string" and res ~= "" then return res end
+			return nil
+		end
+		return env.GrindBrawl_mem
+	end
+
+	local function writeRaw(s)
+		if fileOK and pcall(writefile, CFG_FILE, s) then
+			return "file"
+		end
+		env.GrindBrawl_mem = s
+		return "memory"
+	end
+
+	local function deleteRaw()
+		env.GrindBrawl_mem = nil
+		if fileOK and type(delfile) == "function" then
+			pcall(function()
+				if isfile(CFG_FILE) then delfile(CFG_FILE) end
+			end)
+		end
+	end
+
+	local function decode(raw)
+		if not raw then return nil end
+		local ok, cfg = pcall(HttpService.JSONDecode, HttpService, raw)
+		if ok and type(cfg) == "table" and type(cfg.values) == "table" then return cfg end
+		return nil
+	end
+
+	local function decodeSpot(t)
+		if type(t) ~= "table" or #t ~= 12 then return nil end
+		for i = 1, 12 do
+			if type(t[i]) ~= "number" then return nil end
+		end
+		return CFrame.new(table.unpack(t))
+	end
+
+	-- The spot we remember: the locked return spot, else where you're seated right now,
+	-- else the last place you were seen seated
+	local function currentSpot()
+		if state.manualOrigin and state.origin then return state.origin end
+		local hrp = getRoot()
+		if hrp and isHeldByMachine() then return hrp.CFrame end
+		return state.lastSeatCF
+	end
+
+	local function collect()
+		local values = {}
+		for _, c in ipairs(controls) do
+			values[c.key] = c.ctl.Get()
+		end
+		local cfg = { version = CFG_VERSION, values = values }
+		local spot = currentSpot()
+		if spot then cfg.spot = { spot:GetComponents() } end
+		return cfg
+	end
+
+	-- Boxes first so rep speed / ping limits are set before their switches start anything
+	local function applyValues(values)
+		for _, kind in ipairs({ "box", "switch" }) do
+			for _, c in ipairs(controls) do
+				local v = values[c.key]
+				if c.kind == kind and v ~= nil then
+					if kind == "box" then
+						if type(v) == "string" and v ~= "" then pcall(c.ctl.Set, c.ctl, v) end
+					elseif type(v) == "boolean" then
+						pcall(c.ctl.Set, c.ctl, v)
+					end
+				end
+			end
+		end
+	end
+
+	local function stamp() return os.date("%H:%M:%S") end
+
+	local function trySit(spot, goToSpot)
+		local t0 = os.clock()
+		while gui.Parent and not (getRoot() and getHumanoid()) and os.clock() - t0 < 15 do
+			task.wait(0.25)
+		end
+		for attempt = 1, 6 do
+			if not gui.Parent then return false end
+			if isHeldByMachine() then return true end
+			local hrp = getRoot()
+			if goToSpot and spot and hrp and (hrp.Position - spot.Position).Magnitude > CONFIG.ReturnTolerance then
+				pcall(function()
+					hrp.CFrame = spot
+					hrp.Velocity = Vector3.zero
+				end)
+				task.wait(0.5)
+			end
+			pressE()
+			task.wait(1.2)
+		end
+		return isHeldByMachine()
+	end
+
+	local function runAutoload(cfg)
+		local v = cfg.values
+		local delay = math.clamp(tonumber(v.loadDelay) or 3, 0, 60)
+		setCfgStatus(string.format("Autoload in %ds...", delay))
+		task.wait(delay)
+		if not gui.Parent then return end
+
+		applyValues(v)
+		setCfgStatus("Config loaded " .. stamp())
+
+		local spot = decodeSpot(cfg.spot)
+		local wantGo, wantSit = v.goToSpot ~= false, v.autoSit == true
+		if spot then
+			state.origin = spot
+			state.manualOrigin = true
+		end
+		if not (wantGo or wantSit) then return end
+		if not spot and wantGo then
+			setCfgStatus("No saved spot - settings loaded " .. stamp())
+			if not wantSit then return end
+		end
+
+		if wantGo and spot then
+			local t0 = os.clock()
+			while gui.Parent and not getRoot() and os.clock() - t0 < 15 do task.wait(0.25) end
+			local hrp = getRoot()
+			if hrp then
+				pcall(function()
+					hrp.CFrame = spot
+					hrp.Velocity = Vector3.zero
+				end)
+			end
+		end
+		if wantSit then
+			if trySit(spot, wantGo) then
+				setCfgStatus("Config loaded - seated " .. stamp())
+			else
+				setCfgStatus("Couldn't sit - stand on your weight " .. stamp())
+			end
+		end
+	end
+
+	parentFrame = colCfg
+	sectionLabel("💾 SAVE / LOAD")
+	cfgStatus = addTextRow("No saved config yet", 46)
+
+	addButton("💾  Save Config", function()
+		local cfg = collect()
+		local ok, json = pcall(HttpService.JSONEncode, HttpService, cfg)
+		if not ok then
+			setCfgStatus("Save failed: couldn't encode")
+			return
+		end
+		local where = writeRaw(json)
+		local msg = "Saved " .. stamp() .. (where == "file" and " (file)" or " (memory only - no file access)")
+		if not cfg.spot then msg = msg .. " - no spot saved" end
+		setCfgStatus(msg)
+	end, true)
+
+	addButton("📂  Load Config", function()
+		local cfg = decode(readRaw())
+		if not cfg then
+			setCfgStatus("Nothing to load")
+			return
+		end
+		applyValues(cfg.values)
+		local spot = decodeSpot(cfg.spot)
+		if spot then
+			state.origin = spot
+			state.manualOrigin = true
+		end
+		setCfgStatus("Config loaded " .. stamp())
+	end)
+
+	addButton("🗑️  Delete Saved Config", function()
+		deleteRaw()
+		setCfgStatus("Saved config deleted")
+	end)
+
+	sectionLabel("🚀 AUTOLOAD")
+	addSwitch("Autoload on execute", false, function() end, "autoload")
+	addSwitch("Go to saved spot", true, function() end, "goToSpot")
+	addSwitch("Press E to sit", false, function() end, "autoSit")
+	addBox("Load Delay (s)", "3", function() end, "loadDelay")
+	addLabel("Save Config stores every switch and box in the script, plus your return spot (or where you're sitting). With Autoload on, the next execute restores it all, walks to the spot and sits.", 62)
+
+	if not fileOK then
+		addLabel("This executor has no file functions - config is kept in memory until you leave the game.", 34)
+	end
+
+	cfgApi.start = function()
+		local raw = readRaw()
+		if not raw then
+			setCfgStatus("No saved config yet")
+			return
+		end
+		local cfg = decode(raw)
+		if not cfg then
+			setCfgStatus("Saved config is unreadable")
+			return
+		end
+		if cfg.values.autoload == true then
+			local ok, err = pcall(runAutoload, cfg)
+			if not ok then
+				warn("[GrindBrawl] autoload failed: " .. tostring(err))
+				setCfgStatus("Autoload error - see console")
+			end
+		else
+			setCfgStatus("Saved config found - autoload is off")
+		end
+	end
+end
+
+------------------------------------------------------------------------
+-- Minimise / show / close
+------------------------------------------------------------------------
+local minimized = false
+minBtn.Activated:Connect(function()
+	minimized = not minimized
+	minBtn.Text = minimized and "+" or "–"
+	if minimized then
+		body.Visible = false
+		footer.Visible = false
+		tween(root, 0.3, { Size = UDim2.fromOffset(WIDTH, HEADER_H) }, Enum.EasingStyle.Back)
+	else
+		tween(root, 0.3, { Size = UDim2.fromOffset(WIDTH, curHeight) }, Enum.EasingStyle.Back)
+		task.delay(0.12, function()
+			if gui.Parent and not minimized then
+				body.Visible = true
+				footer.Visible = true
+			end
+		end)
+	end
+end)
+
+local shown = true
+local function setShown(on)
+	if shown == on then return end
+	shown = on
+	if on then
+		gui.Enabled = true
+		scaler.Scale = fitScale() * 0.9
+		window.GroupTransparency = 1
+		shadow.BackgroundTransparency = 1
+		tween(scaler, 0.35, { Scale = fitScale() }, Enum.EasingStyle.Back)
+		tween(window, 0.25, { GroupTransparency = 0 })
+		tween(shadow, 0.25, { BackgroundTransparency = 0.2 })
+	else
+		tween(scaler, 0.22, { Scale = fitScale() * 0.9 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+		tween(window, 0.2, { GroupTransparency = 1 })
+		tween(shadow, 0.2, { BackgroundTransparency = 1 })
+		task.delay(0.24, function()
+			if not shown and gui.Parent then gui.Enabled = false end
+		end)
+	end
+end
+
+track(UserInputService.InputBegan:Connect(function(input, processed)
+	if not processed and input.KeyCode == Enum.KeyCode.RightShift then
+		setShown(not shown)
+	end
+end))
+
+local function shutdown()
+	state.fastRep = false
+	state.autoBrawl = false
+	state.autoEgg = false
+	state.brawlActive = false
+	state.brawlBusy = false
+	for _, c in ipairs(conns) do pcall(c.Disconnect, c) end
+	table.clear(conns)
+	if gui.Parent then gui:Destroy() end
+	if env.GrindBrawlCleanup == shutdown then env.GrindBrawlCleanup = nil end
+end
+env.GrindBrawlCleanup = shutdown
+
+closeBtn.Activated:Connect(function()
+	state.fastRep = false
+	state.autoBrawl = false
+	state.autoEgg = false
+	state.brawlActive = false
+	state.brawlBusy = false
+	tween(scaler, 0.25, { Scale = fitScale() * 0.85 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+	tween(window, 0.22, { GroupTransparency = 1 })
+	tween(shadow, 0.22, { BackgroundTransparency = 1 })
+	task.delay(0.28, shutdown)
+end)
+
+------------------------------------------------------------------------
+-- Theme
+------------------------------------------------------------------------
+setTheme = function(name, animate)
+	if name ~= "light" and name ~= "dark" then return end
+	local dark = name == "dark"
+	currentTheme = name
+	for obj, props in pairs(bindings) do
+		if obj.Parent then
+			local goal = {}
+			for prop, key in pairs(props) do goal[prop] = tc(key) end
+			if animate then
+				tween(obj, 0.45, goal, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+			else
+				for prop, col in pairs(goal) do obj[prop] = col end
+			end
+		end
+	end
+	local dimGoal = dark and 0.22 or 1
+
+	for _, d in ipairs(gui:GetDescendants()) do
+		if d:IsA("TextLabel") then
+			local base = d:GetAttribute("StrokeBase")
+			if base == nil and d.TextStrokeTransparency < 1 and d.TextStrokeTransparency > 0.2 then
+				base = d.TextStrokeTransparency
+				d:SetAttribute("StrokeBase", base)
+			end
+			if base ~= nil then
+				local goal = dark and 0 or base
+				if animate then
+					tween(d, 0.45, { TextStrokeTransparency = goal }, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+				else
+					d.TextStrokeTransparency = goal
+				end
+			end
+		end
+	end
+	if animate then
+		tween(dim, 0.45, { BackgroundTransparency = dimGoal }, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+		tween(mixValue, 0.45, { Value = dark and 1 or 0 }, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+		themeBtn.Rotation = 0
+		tween(themeBtn, 0.5, { Rotation = 360 }, Enum.EasingStyle.Back)
+		task.delay(0.55, function() themeBtn.Rotation = 0 end)
+		scaler.Scale = fitScale() * 0.97
+		tween(scaler, 0.4, { Scale = fitScale() }, Enum.EasingStyle.Back)
+	else
+		dim.BackgroundTransparency = dimGoal
+		mixValue.Value = dark and 1 or 0
+	end
+	themeBtn.Text = dark and "☀️" or "🌙"
+	if darkSwitch and darkSwitch.Get() ~= dark then darkSwitch:Set(dark, true) end
+	pcall(function()
+		if writefile then writefile("grindbrawl_theme.txt", name) end
+	end)
+end
+
+themeBtn.Activated:Connect(function()
+	setTheme(currentTheme == "dark" and "light" or "dark", true)
+end)
+
+do
+	local saved = "light"
+	pcall(function()
+		if isfile and readfile and isfile("grindbrawl_theme.txt") then saved = readfile("grindbrawl_theme.txt") end
+	end)
+	if saved == "dark" then setTheme("dark", false) end
+end
+
+------------------------------------------------------------------------
+-- Pixel art (drawn off-thread, in chunks)
+------------------------------------------------------------------------
+do
+	local BG_PAL = { "adc1c4", "e2aea5", "e5a9a0", "dba99d", "e2a79c", "e1a59a", "dca59a", "dfa39a", "dea29a", "d6a097", "aa9a99", "b38d87", "738b91", "484a58" }
+	local BG_ROWS = {
+		"224455557778757777778878877777777554475575544774444245544444",
+		"222454455777547778777888887777887875557777554787554225755544",
+		"222242247777445777787778788744788887557777775555554245775544",
+		"224442247755425558887778888755787775777877544444422245777544",
+		"224442247777445557874588777578888755875777524222222444555555",
+		"224442257777545577775587885577877545877777744422222244575777",
+		"224444458877444577778878877777555455777788777542222224575555",
+		"224445787777545578787888878778555555577755777744422444544444",
+		"224444775544455577887877788878777755577545788855555775442224",
+		"225522455442247758788775888887778744577757777888777777422224",
+		"224542445554447855787558877887787775578777888888877754422222",
+		"125522457577757742575778887875788777777757778877775542222222",
+		"224422444477578752455777778855777787877555787877555522222222",
+		"222224422477555744445555557755557877875578877755444442222222",
+		"224424444455555757757777555577457887775788877878542442222222",
+		"245424555445557788877877755785472248885588888777544477455544",
+		"245524557755577577775578775787721119878678778877542555557544",
+		"224442457777577755775577877788611116887887778855544455555422",
+		"222242577777555775887555888889211118887888745554221245554442",
+		"2222455555554455547887556111111111197787885444229b9114555544",
+		"122275774222224555578777811111111168887777422219b69b22454444",
+		"22225445521222255557777891111111119788555522221b993bb1222224",
+		"22244444412222255557887861111111166777444442221b9993bb122222",
+		"22244221161122255558888888961111398754442455212b69996b422422",
+		"22454212bbb212455557888867911111698844445555214b399999922422",
+		"2455421b91b912455777877888811111111754458877424b399999b42422",
+		"22552199399b12477547754778111111111774245775422b999999991222",
+		"224422b3993b32455444444586111111111654444555421b9999999b1222",
+		"22541993993b9124444224458111111111122244455542199999999b2122",
+		"22541b9999699124244445576111139888424555555542199999999b6122",
+		"22542b9399699124554447776111185456424755445554199999996b9222",
+		"2252229b9999b1455755777761113424444445575467541bb999999b9242",
+		"2242226b9999b2467755767763332241112224556776422cb699999b9257",
+		"224229b99999b4267996966633261bc932111336966442acb399999b9255",
+		"44427b699999b6264996633119aaccccccbb2113666214ccb399999b9265",
+		"45546b999999b62444444116aaccddccccccdcb912211bccc399999b6466",
+		"45555b999993bb13444415ccccccccccccccd00cb1213cccc399999b3456",
+		"44442b999993bd1144112accccccccccccccc000ccc39cccc699999b2545",
+		"4422299999939dc11199a000cccccccccccc00000cccccccc69996bb2665",
+		"422226b999939ccb1bcd0000accccccccccc000000dcdcccc69996b62667",
+		"424422b999996ccdcccc00000cccccccccca00cdd0cdccccb39999914644",
+		"2245429999992cccdcc00c000cccccccccc00dc0dd0dccccb39939614547",
+		"4445546b99991bccddccdcd00cccddddccc0cd00dd0ccccdb9bb99245557",
+		"4557552999993bcccd0dd0cd0acdddcdddd0ddddddcccccdbb99b4455757",
+		"44555542b9993bcccddddddd0cddddddddd0ddddddc0cccd999122555555",
+		"445555529b3999ccccdddddd0cdddddddddddddddda0ccdb81b422577544",
+		"445755522b9693ccccddddddccdddddddddcdddddd00ddbb9bb122555554",
+		"4455775522b931bccccdddddccddddddddd0ddddd00adddddb1444455554",
+		"44557555429cb1bdcc0dddddc0ddddddddc00cdd000cdddd612244555542",
+		"225555554428dcbbcc00ddd00acdddddddc0000000ccbb91122445557742",
+		"2455445444411bdddd0000000cccddddcccca000accc1111112447777522",
+		"444555554211111cddd0000accccccccccccccccccc9119b111247675422",
+		"4445554541111a111bddccccccca00000acccccccc6112ccbac926675422",
+		"457544452196bcc1111bddcc0000000000000cdcb2499accccdb16677522",
+		"455742441bcccccaabb9bddcca000000000cdddbccccccccccdb44567542",
+		"445752221bdccccccccccccdddcc0000000cccccccccccdddccdb1576644",
+		"445754218cccdddcccccccccc00000000000ccccccccccccdcdc22456644",
+		"445442219dccddccccccccccc000c0000000cccccccccccccccb16566744",
+		"224422421bdccccccccccccc0000cc000000ccccccccccccccdb26667544",
+		"2224224522ddddccccccdddc00000a0000000ccddddddddb912245777544",
+		"2224224442999bddddddbbcc0000000000000ccdbbbb9621124557555545",
+		"122222244422112222111cca0000000000000ccdb1111224444477555544",
+		"22222224557524421111bcc000000000000000ccd1112245444447555544",
+		"22222224454224422111ccc000000000000000ccd9111111224544544242",
+		"1112111112111111111bccc000000000000000ccdb1119cb111111111111",
+		"899999999999989885ccccc000000000000000cccd52bdcc788888777757",
+		"bbbbbbbbbbbbbbbb9dccccdc0000000000000dccccddccccbb9b9bb99999",
+		"3366333336334331bccccccdd0000000000cdcccccdcccc9433443333324",
+		"6999966699996692bccccccdddc0000000cdddcccccdc0a5333333666666",
+		"6699999999996662bcccccdddddc00000cdddddccccd0a97999999666666",
+		"6699996699666661bccccddddddcccccadddddddcccdbbbbbbbbb9669666",
+		"66999996666334659dcccdddddddcccccdddddddccdb9bb9963114669966",
+		"66999996669bbbbb9ddccddddddbbbbbbbddddddcdd9bbbbbbb936669966",
+		"66999996699999bbb9ddddddddd5999999dddddddd9bbbbb999936669966",
+		"66999999666333339b9bdddddd99bbbbb9bdddddb9b93333333136699966",
+		"6699999999996666369759bbb9999bbbbb9bbbb889633336996336699666",
+		"966699999666666666333111233333633333111333333333996366696666",
+		"666666666633333333333663333333434333333333333333333666663333",
+	}
+	local FACE_PAL = { "a9cfd4", "a4c1c5", "e6b4ad", "a0b8bc", "ddaca4", "daa8a0", "a3a1a1", "989191", "809498", "788c92", "6f7074", "262a3c" }
+	local FACE_ROWS = {
+		"524455555555522245555544455555555425",
+		"644555555555522254444444455555555427",
+		"644555555555555424522244445555554459",
+		"644555555555445556965542245555544268",
+		"6545555555424563aa889997554445542588",
+		"6525544442456888ab988889aa7622242788",
+		"7725444525a9988888888889a01375525888",
+		"6a524422563998888998998a60313a966988",
+		"5a9224776000898889898899133109a9a888",
+		"5a97479a1130398888888896111810a9a888",
+		"5a8aa8a8000119889aa9889303aab18aa888",
+		"4a98a8a08a8008989aaa88830b10bb0a988a",
+		"4798aa3ab0a8088abbbbba809b9abb39988a",
+		"47a89a8bb0ab03abba8abbb0bbbbbb93988a",
+		"55a89abbbbbb08bbbabbbbb8bbbbbb93a8aa",
+		"55a899bbbbbb8abbbbbbbbbabbbbbb33a9a7",
+		"547998abbbbb99bbbbbbbbb9bbbbba03aa77",
+		"447a983bbbbba3bbbbbbbbb08bbbb008baab",
+		"745a990abbbb31abbbbbbb800188001abaa7",
+		"7aa7aa008a90088abbbbb9880000138a5422",
+		"25aaab8000006888aaba8888833688a72222",
+		"2225aaa8333899998888888999999aa24269",
+		"5762227aa999863111111133689aa7222588",
+		"a8855425aaa61000000100013aaa55777789",
+		"998888777aaaa9863101113aaaa9999889aa",
+		"9aa988888889a986110111038888888889aa",
+		"aaa988888888800033011111888888888889",
+		"aa98888888896013a8011111888888888888",
+		"a988888889a9311189113110389a99999aaa",
+		"aaaaaaaaaaa8113311131110189baaaaaa75",
+		"2577aa775798113333333111088a52222222",
+		"422222225a83033333333111038aa2444455",
+		"4454444279810111333333331398a5244444",
+		"44442422a9800111133333331199a5242254",
+		"2222225a98800111133333331188a72227aa",
+		"555557a8998001113333333103998a75a98a",
+	}
+
+	local function drawPixels(container, palette, rows)
+		local GH, GW = #rows, #rows[1]
+		local colors = {}
+		for i, hex in ipairs(palette) do
+			colors[i - 1] = Color3.fromRGB(
+				tonumber(hex:sub(1, 2), 16),
+				tonumber(hex:sub(3, 4), 16),
+				tonumber(hex:sub(5, 6), 16)
+			)
+		end
+		local function emit(a)
+			create("Frame", {
+				Position = UDim2.new((a.x - 1) / GW, 0, (a.y - 1) / GH, 0),
+				Size = UDim2.new(a.w / GW, 1, a.h / GH, 1),
+				BackgroundColor3 = colors[a.c],
+				BorderSizePixel = 0,
+			}, container)
+		end
+		local active, made = {}, 0
+		for y = 1, GH do
+			local row, cur, x = rows[y], {}, 1
+			while x <= GW do
+				local ch, x0 = row:sub(x, x), x
+				while x <= GW and row:sub(x, x) == ch do x += 1 end
+				local key = x0 .. ":" .. (x - x0) .. ":" .. ch
+				local a = active[key]
+				if a then
+					a.h += 1
+					cur[key] = a
+				else
+					cur[key] = { x = x0, y = y, w = x - x0, h = 1, c = tonumber(ch, 16) }
+				end
+			end
+			for key, a in pairs(active) do
+				if not cur[key] then
+					emit(a)
+					made += 1
+				end
+			end
+			active = cur
+			if made > 250 then
+				made = 0
+				task.wait()
+			end
+			if not container.Parent then return end
+		end
+		for _, a in pairs(active) do emit(a) end
+	end
+
+	task.spawn(function()
+		drawPixels(avatarPixels, FACE_PAL, FACE_ROWS)
+		drawPixels(pixelLayer, BG_PAL, BG_ROWS)
+	end)
+end
+
+------------------------------------------------------------------------
+-- Intro + autoload
+------------------------------------------------------------------------
+window.GroupTransparency = 1
+shadow.BackgroundTransparency = 1
+scaler.Scale = fitScale() * 0.88
+tween(scaler, 0.45, { Scale = fitScale() }, Enum.EasingStyle.Back)
+tween(window, 0.35, { GroupTransparency = 0 })
+tween(shadow, 0.35, { BackgroundTransparency = 0.2 })
+
+task.spawn(cfgApi.start)
+
+print("[GrindBrawl] loaded")
