@@ -4254,6 +4254,7 @@ local ThemeMapSystem = (function()
 	end
 
 	local centers = {}
+	local placeZones = {}   -- {x, z, radius} for extra places; protects the saved return spot
 	local MAP_BASE_X, MAP_BASE_Z, MAP_SPACING, MAP_Y = 12000, 12000, 1100, 120
 	local FNAF_CENTER = Vector3.new(10000, 150, 0) -- FNAF 2 map: ~10k studs from spawn (updated when it loads)
 	local BR_CENTER = Vector3.new(60000, 150, 60000) -- Backrooms: far from the game and every other theme map
@@ -4486,6 +4487,10 @@ local ThemeMapSystem = (function()
 		if (fx * fx + fz * fz) < (2500 * 2500) then return true end
 		local bx, bz = position.X - BR_CENTER.X, position.Z - BR_CENTER.Z
 		if (bx * bx + bz * bz) < (4000 * 4000) then return true end
+		for _, z in ipairs(placeZones) do
+			local zx, zz = position.X - z[1], position.Z - z[2]
+			if (zx * zx + zz * zz) < (z[3] * z[3]) then return true end
+		end
 		return false
 	end
 
@@ -5041,9 +5046,152 @@ local ThemeMapSystem = (function()
 		return true, "Returned to the position saved before entering a theme map."
 	end
 
+	----------------------------------------------------------------
+	-- EXTRA PLACES: Daycare Obby, Prison Life, Krusty Krab (downloaded from GitHub when you click them)
+	----------------------------------------------------------------
+	local PLACE_ORDER = { "obby", "prison", "krusty" }
+	local PLACES = {
+		obby = {
+			label = "Daycare Obby", icon = "🧸",
+			url = "https://raw.githubusercontent.com/zyyer4/daycare/refs/heads/main/care",
+			offset = Vector3.new(30000, 50, 0), zone = { 30200, -31290, 3000 },
+			folders = { "DaycareMapLocal" }, cleanup = "DaycareMapCleanup",
+		},
+		prison = {
+			label = "Prison Life", icon = "🚔",
+			url = "https://raw.githubusercontent.com/zyyer4/prison/refs/heads/main/life",
+			offset = Vector3.new(45000, 100, 0), zone = { 45863, 335, 4500 },
+			folders = { "GB_LocalMap" },
+		},
+		krusty = {
+			label = "Krusty Krab", icon = "🍔",
+			url = "https://raw.githubusercontent.com/zyyer4/krusty/refs/heads/main/crab",
+			offset = Vector3.new(30000, 100, 8000), zone = { 30003, 8020, 3000 },
+			folders = { "LocalKrustyKrab" },
+		},
+	}
+	for _, key in ipairs(PLACE_ORDER) do placeZones[#placeZones + 1] = PLACES[key].zone end
+
+	local placeLanding = {}   -- place -> CFrame you landed at (clicking it again just teleports you back in)
+	local placeLoading = false
+
+	local function placeFolderAlive(def)
+		for _, name in ipairs(def.folders) do
+			if World:FindFirstChild(name) then return true end
+		end
+		return false
+	end
+
+	local function inPlaceZone(position, def)
+		local dx, dz = position.X - def.zone[1], position.Z - def.zone[2]
+		return (dx * dx + dz * dz) < (def.zone[3] * def.zone[3])
+	end
+
+	-- moves the map to this place's own spot, and makes Krusty's leftover safety-net loop stop when unloaded
+	local function patchPlaceSource(key, src, def)
+		local off = def.offset
+		local a, b = src:find("local OFFSET = Vector3%.new%b()")
+		if a then
+			src = src:sub(1, a - 1)
+				.. string.format("local OFFSET = Vector3.new(%d, %d, %d)", off.X, off.Y, off.Z)
+				.. src:sub(b + 1)
+		end
+		if key == "krusty" then
+			local needle = "RunService.Heartbeat:Connect(function()\n    local c = player.Character"
+			local s, e = src:find(needle, 1, true)
+			if s then
+				src = src:sub(1, s - 1)
+					.. "local __gbCn; __gbCn = RunService.Heartbeat:Connect(function()\n"
+					.. "    if not folder.Parent then __gbCn:Disconnect() return end\n"
+					.. "    local c = player.Character"
+					.. src:sub(e + 1)
+			end
+		end
+		return src
+	end
+
+	local function loadPlace(key)
+		local def = PLACES[key]
+		if not def then return false, "Unknown place." end
+		if placeLoading then return false, "A place is still loading - wait for it to finish." end
+		local character = player.Character or player.CharacterAdded:Wait()
+		local rootPart = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart", 8)
+		if not rootPart then return false, "Character root was not found." end
+
+		brRestoreLighting()
+		fnafLeave()
+		if not returnCFrame and not isNearAnyCustomMap(rootPart.Position) then
+			returnCFrame = rootPart.CFrame
+			env.GrindBrawlThemeMapReturnCFrame = returnCFrame
+		end
+		state.mapTrip = true
+
+		-- already built: just teleport back into it
+		if placeFolderAlive(def) and placeLanding[key] then
+			local humanoid = character:FindFirstChildOfClass("Humanoid")
+			if humanoid then humanoid.Sit = false end
+			rootPart.AssemblyLinearVelocity = Vector3.zero
+			rootPart.CFrame = placeLanding[key]
+			return true, def.icon .. " " .. def.label .. " - teleported back into the loaded map."
+		end
+
+		local okGet, src = pcall(function() return game:HttpGet(def.url) end)
+		if not okGet or type(src) ~= "string" or #src < 100 or src:sub(1, 3) == "404" then
+			state.mapTrip = false
+			return false, "Couldn't download " .. def.label .. " from GitHub (check the repo is public and the link is right)."
+		end
+		local fn, err = loadstring(patchPlaceSource(key, src, def))
+		if not fn then
+			state.mapTrip = false
+			return false, def.label .. " script failed to compile: " .. tostring(err)
+		end
+
+		placeLoading = true
+		local ok, runErr = pcall(fn)   -- the map script builds it, then teleports you into it
+		placeLoading = false
+		if not ok then
+			return false, def.label .. " build error: " .. tostring(runErr)
+		end
+		task.wait(0.3)
+		local r = getRoot()
+		if not r or not inPlaceZone(r.Position, def) then
+			return false, def.label .. " built, but you weren't teleported into it (the game may have moved you back)."
+		end
+		placeLanding[key] = r.CFrame
+		return true, def.icon .. " " .. def.label .. " loaded. Use Return to go back."
+	end
+
+	-- gets you out first (so you don't fall into the void), then deletes every extra place
+	local function unloadPlaces()
+		local r = getRoot()
+		if r then
+			for _, key in ipairs(PLACE_ORDER) do
+				if inPlaceZone(r.Position, PLACES[key]) then
+					returnToSavedSpot()
+					break
+				end
+			end
+		end
+		local count = 0
+		for _, key in ipairs(PLACE_ORDER) do
+			local def = PLACES[key]
+			if def.cleanup and type(_G[def.cleanup]) == "function" then pcall(_G[def.cleanup]) end
+			for _, name in ipairs(def.folders) do
+				local f = World:FindFirstChild(name)
+				if f then
+					f:Destroy()
+					count += 1
+				end
+			end
+			placeLanding[key] = nil
+		end
+		return count
+	end
+
 	return {
 		Teleport = teleport, Return = returnToSavedSpot, Build = buildMap,
 		Backrooms = teleportBackrooms,
+		Place = loadPlace, UnloadPlaces = unloadPlaces, Places = PLACES, PlaceOrder = PLACE_ORDER,
 		Stop = function() brToken += 1; brRestoreLighting(); fnafLeave(); state.mapTrip = false end,
 	}
 end)()
@@ -5134,6 +5282,70 @@ backroomsButton.Activated:Connect(function()
 	end)
 end)
 end
+
+sectionLabel("🏝️ EXTRA PLACES")
+addLabel("Daycare Obby, Prison Life and Krusty Krab download from GitHub and are built locally far away (only you see them) with a huge platform underneath. Big maps can take a while.", 62)
+
+local placeGrid = create("Frame", {
+	LayoutOrder = nextOrder(),
+	Size = UDim2.new(1, 0, 0, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
+	BackgroundTransparency = 1,
+}, parentFrame)
+create("UIGridLayout", {
+	CellSize = UDim2.new(0.5, -5, 0, 48),
+	CellPadding = UDim2.fromOffset(9, 9),
+	SortOrder = Enum.SortOrder.LayoutOrder,
+}, placeGrid)
+
+for i, key in ipairs(ThemeMapSystem.PlaceOrder) do
+	local def = ThemeMapSystem.Places[key]
+	local chip = create("TextButton", {
+		LayoutOrder = i,
+		BackgroundColor3 = CREAM,
+		Text = def.icon .. "  " .. def.label .. "\nLOAD + TELEPORT",
+		TextColor3 = INK,
+		TextSize = 11,
+		Font = FONT_TITLE,
+		TextWrapped = true,
+		AutoButtonColor = false,
+	}, placeGrid)
+	create("UICorner", { CornerRadius = UDim.new(0, 12) }, chip)
+	create("UIStroke", { Color = INK, Thickness = 2 }, chip)
+	Skin.decorate(chip, "raised", UDim.new(0, 12))
+	chip.MouseButton1Down:Connect(function() Skin.press(chip, true) end)
+	chip.MouseButton1Up:Connect(function() Skin.press(chip, false) end)
+	chip.MouseLeave:Connect(function() Skin.press(chip, false) end)
+	chip.Activated:Connect(function()
+		mapStatus.Text = "Downloading + building " .. def.label .. "... don't move."
+		task.spawn(function()
+			local ok, success, message = pcall(ThemeMapSystem.Place, key)
+			if not ok then
+				mapStatus.Text = def.label .. " error: " .. tostring(success)
+			else
+				mapStatus.Text = message or (success and (def.label .. " loaded.") or "Could not load that place.")
+			end
+		end)
+	end)
+end
+
+local unloadPlacesButton = create("TextButton", {
+	LayoutOrder = nextOrder(),
+	Size = UDim2.new(1, 0, 0, 38),
+	BackgroundColor3 = CREAM,
+	Text = "🗑️  UNLOAD EXTRA PLACES",
+	TextColor3 = INK,
+	TextSize = 13,
+	Font = FONT_TITLE,
+	AutoButtonColor = false,
+}, parentFrame)
+create("UICorner", { CornerRadius = UDim.new(0, 12) }, unloadPlacesButton)
+create("UIStroke", { Color = INK, Thickness = 2 }, unloadPlacesButton)
+Skin.decorate(unloadPlacesButton, "raised", UDim.new(0, 12))
+unloadPlacesButton.Activated:Connect(function()
+	local ok, count = pcall(ThemeMapSystem.UnloadPlaces)
+	mapStatus.Text = ok and ("Unloaded " .. tostring(count) .. " extra place(s).") or ("Unload error: " .. tostring(count))
+end)
 
 local mapReturnButton = create("TextButton", {
 	LayoutOrder = nextOrder(),
