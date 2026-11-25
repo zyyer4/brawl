@@ -35,7 +35,7 @@ local fireBrawl = brawlEvent and brawlEvent.FireServer
 local CONFIG = {
 	JoinTimeout = 15,
 	ArenaRadius = 400,
-	PunchInterval = 0.03,
+	PunchInterval = 0.6, -- regular tool activation cadence; no rapid remote punching
 	FollowBehindStuds = 3,
 	MaxBrawlSeconds = 240,
 	ReturnTimeout = 8,
@@ -5857,10 +5857,6 @@ local function equipPunch()
 			pcall(function() tool.Parent = char end)
 		end
 	end
-	local attackTime = tool:FindFirstChild("attackTime")
-	if attackTime and attackTime:IsA("ValueBase") and attackTime.Value ~= 0 then
-		pcall(function() attackTime.Value = 0 end)
-	end
 	return tool
 end
 
@@ -5929,8 +5925,7 @@ local function hitTarget(target, tool)
 		hrp.CFrame = CFrame.new(tRoot.Position - tRoot.CFrame.LookVector * CONFIG.FollowBehindStuds, tRoot.Position)
 		hrp.Velocity = Vector3.zero
 	end)
-	pcall(fireMuscle, muscleEvent, "punch", "rightHand")
-	pcall(fireMuscle, muscleEvent, "punch", "leftHand")
+	-- Use the game's normal Punch tool activation only. Do not fire punch remotes directly.
 	if tool and tool.Parent == player.Character then
 		pcall(function() tool:Activate() end)
 	end
