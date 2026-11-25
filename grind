@@ -5861,6 +5861,19 @@ local function equipPunch()
 	return tool
 end
 
+-- When Script Auto-Punch is OFF, leave an already-equipped Punch tool alone
+-- so the game's built-in Auto Punch / tool glitch can keep using it.
+local function unequipToolsPreservingPunch()
+	local char = player.Character
+	local hum = getHumanoid()
+	if not hum then return end
+	local punch = char and char:FindFirstChild("Punch")
+	if not state.scriptAutoPunch and punch and punch:IsA("Tool") then
+		return
+	end
+	pcall(function() hum:UnequipTools() end)
+end
+
 local function nearestTarget()
 	local hrp = getRoot()
 	if not hrp then return nil end
@@ -5904,7 +5917,7 @@ local function altStep()
 	local hum = getHumanoid()
 	if hum and os.clock() - lastAltTool > 1 then
 		lastAltTool = os.clock()
-		pcall(function() hum:UnequipTools() end)
+		unequipToolsPreservingPunch()
 	end
 	local main = findMain()
 	local mRoot = main and main.Character and main.Character:FindFirstChild("HumanoidRootPart")
@@ -5935,8 +5948,9 @@ end
 local function returnToSpot()
 	local origin = state.origin
 	if not origin then return end
-	local hum = getHumanoid()
-	if hum then pcall(function() hum:UnequipTools() end) end
+	-- Do not call Humanoid:UnequipTools() over an equipped Punch when the
+	-- script puncher is disabled; that would break the built-in punch behavior.
+	unequipToolsPreservingPunch()
 	local deadline = os.clock() + CONFIG.ReturnTimeout
 	local stable = 0
 	while os.clock() < deadline and gui.Parent do
@@ -5957,9 +5971,10 @@ local function returnToSpot()
 	end
 	local h = getHumanoid()
 	if state.prevTool and h then
+		local char = player.Character
 		local bp = player:FindFirstChild("Backpack")
-		local prev = bp and bp:FindFirstChild(state.prevTool)
-		if prev then pcall(function() h:EquipTool(prev) end) end
+		local prev = (char and char:FindFirstChild(state.prevTool)) or (bp and bp:FindFirstChild(state.prevTool))
+		if prev and prev.Parent ~= char then pcall(function() h:EquipTool(prev) end) end
 	end
 	if state.reSit then
 		local attempts = state.seatedAtStart and 5 or 1
@@ -6003,7 +6018,7 @@ local function startBrawl(arena)
 		local char = player.Character
 		if char then
 			for _, t in ipairs(char:GetChildren()) do
-				if t:IsA("Tool") and t.Name ~= "Punch" then
+				if t:IsA("Tool") and (t.Name ~= "Punch" or not state.scriptAutoPunch) then
 					state.prevTool = t.Name
 					break
 				end
@@ -6114,7 +6129,7 @@ addSwitch("Script Auto-Punch", false, function(on)
 	state.scriptAutoPunch = on
 end, "scriptAutoPunch")
 
-addLabel("Off: the script will not equip or activate Punch. You can use the game's own Auto Punch setting instead.", 38)
+addLabel("Off: the script will not equip, activate, or unequip an already-equipped Punch. Use the game's own Auto Punch setting instead.", 42)
 
 addSwitch("Auto Brawl", false, function(on)
 	state.autoBrawl = on
