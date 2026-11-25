@@ -26,13 +26,14 @@ if old then old:Destroy() end
 local muscleEvent = player:WaitForChild("muscleEvent", 10)
 local rEvents = ReplicatedStorage:WaitForChild("rEvents", 10)
 local brawlEvent = rEvents and rEvents:WaitForChild("brawlEvent", 10)
+-- Muscle Warriors uses ReplicatedStorage.Configs.brawlRound as the join token.
+local brawlConfigs = ReplicatedStorage:WaitForChild("Configs", 10)
+local brawlRound = brawlConfigs and brawlConfigs:WaitForChild("brawlRound", 10)
 local fireMuscle = muscleEvent and muscleEvent.FireServer
 local fireBrawl = brawlEvent and brawlEvent.FireServer
 
 local CONFIG = {
 	JoinTimeout = 15,
-	JoinRetryDelay = 0.4,
-	JoinMovedStuds = 30,
 	ArenaRadius = 400,
 	PunchInterval = 0.03,
 	FollowBehindStuds = 3,
@@ -3766,17 +3767,29 @@ local function newTab(name, label)
 		Size = UDim2.new(1, 0, 1, 0),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
-		ScrollBarThickness = 12,
+		Active = true,
+		ScrollingEnabled = true,
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+		ElasticBehavior = Enum.ElasticBehavior.WhenScrollable,
+		ClipsDescendants = true,
+		ScrollBarThickness = 8,
 		ScrollBarImageColor3 = INK,
 		ScrollBarImageTransparency = 0.1,
-		CanvasSize = UDim2.new(),
-		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		CanvasSize = UDim2.new(0, 0, 0, 0),
+		AutomaticCanvasSize = Enum.AutomaticSize.None,
 	}, wrapper)
-	create("UIPadding", {
+	local pagePadding = create("UIPadding", {
 		PaddingRight = UDim.new(0, 16), PaddingBottom = UDim.new(0, 8),
 		PaddingLeft = UDim.new(0, 2), PaddingTop = UDim.new(0, 2),
 	}, page)
-	create("UIListLayout", { Padding = UDim.new(0, 9), SortOrder = Enum.SortOrder.LayoutOrder }, page)
+	local listLayout = create("UIListLayout", { Padding = UDim.new(0, 9), SortOrder = Enum.SortOrder.LayoutOrder }, page)
+	local function updatePageCanvas()
+		local verticalPadding = pagePadding.PaddingTop.Offset + pagePadding.PaddingBottom.Offset
+		page.CanvasSize = UDim2.new(0, 0, 0, math.ceil(listLayout.AbsoluteContentSize.Y + verticalPadding + 2))
+	end
+	listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(updatePageCanvas)
+	page:GetPropertyChangedSignal("AbsoluteSize"):Connect(updatePageCanvas)
+	updatePageCanvas()
 
 	local button = create("TextButton", {
 		Position = UDim2.new((tabCount - 1) / TAB_COUNT, 0, 0, 0),
@@ -6001,7 +6014,6 @@ local function startBrawl(arena)
 			end
 		end
 	end
-	local startPos = hrp.Position
 	if not state.manualOrigin then
 		state.origin = hrp.CFrame
 	end
@@ -6012,6 +6024,20 @@ local function startBrawl(arena)
 		if state.brawlToken ~= token or not state.brawlActive then return end
 
 		setStatus("joining brawl", COLORS.text)
+		local roundNumber = brawlRound and brawlRound.Value
+		if type(roundNumber) ~= "number" then
+			warn("[GrindBrawl] ReplicatedStorage.Configs.brawlRound is missing or invalid")
+			finishBrawl(token, "brawl round unavailable")
+			return
+		end
+		-- Match the game's own BrawlJoinPrompt: action plus the current round.
+		local sent, sendError = pcall(fireBrawl, brawlEvent, "joinBrawl", roundNumber)
+		if not sent then
+			warn("[GrindBrawl] joinBrawl request failed: " .. tostring(sendError))
+			finishBrawl(token, "join request failed")
+			return
+		end
+
 		local joined = false
 		local joinStart = os.clock()
 		while state.brawlActive and state.brawlToken == token and os.clock() - joinStart < CONFIG.JoinTimeout do
@@ -6019,13 +6045,12 @@ local function startBrawl(arena)
 				releaseFromMachine(true)
 				doJump()
 			end
-			pcall(fireBrawl, brawlEvent, "joinBrawl")
-			task.wait(CONFIG.JoinRetryDelay)
-			local r = getRoot()
-			if r and (r.Position - startPos).Magnitude >= CONFIG.JoinMovedStuds then
+			local character = player.Character
+			if character and character:FindFirstChild("lastMapCFrame") then
 				joined = true
 				break
 			end
+			task.wait(0.1)
 		end
 		if state.brawlToken ~= token or not state.brawlActive then return end
 		if not joined then
@@ -6084,7 +6109,8 @@ parentFrame = colBrawl
 addSwitch("Auto Brawl", false, function(on)
 	state.autoBrawl = on
 	if on then
-		setStatus(brawlEvent and "waiting for the next brawl" or "brawlEvent not found", brawlEvent and COLORS.green or COLORS.red)
+		local brawlReady = brawlEvent ~= nil and fireBrawl ~= nil and brawlRound ~= nil
+		setStatus(brawlReady and "waiting for the next brawl" or "brawl remote / round value not found", brawlReady and COLORS.green or COLORS.red)
 	elseif state.brawlActive then
 		finishBrawl(state.brawlToken, "turned off")
 	else
