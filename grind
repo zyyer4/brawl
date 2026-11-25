@@ -74,6 +74,7 @@ local state = {
 	prevTool = nil,
 	seatedAtStart = false,
 	altMode = false,
+	scriptAutoPunch = false, -- off by default; let the game's own Auto Punch setting handle attacks
 	mainName = "",
 }
 
@@ -6058,7 +6059,7 @@ local function startBrawl(arena)
 		releaseFromMachine(false)
 		local releaseTries = 0
 		local tool
-		if not state.altMode then tool = equipPunch() end
+		if not state.altMode and state.scriptAutoPunch then tool = equipPunch() end
 		while state.brawlActive and state.brawlToken == token and gui.Parent do
 			if os.clock() - fightStart > CONFIG.MaxBrawlSeconds then
 				finishBrawl(token, "time cap")
@@ -6073,7 +6074,13 @@ local function startBrawl(arena)
 				altStep()
 				task.wait(0.15)
 			else
-				tool = equipPunch()
+				-- Keep the target-following behavior, but only equip/activate Punch when
+				-- Script Auto-Punch is enabled. Otherwise the game's own setting can act.
+				if state.scriptAutoPunch then
+					tool = equipPunch()
+				else
+					tool = nil
+				end
 				local target = nearestTarget()
 				if target then
 					hitTarget(target, tool)
@@ -6100,6 +6107,14 @@ end
 -- BRAWL TAB controls
 ------------------------------------------------------------------------
 parentFrame = colBrawl
+
+sectionLabel("🥊 ATTACKING")
+
+addSwitch("Script Auto-Punch", false, function(on)
+	state.scriptAutoPunch = on
+end, "scriptAutoPunch")
+
+addLabel("Off: the script will not equip or activate Punch. You can use the game's own Auto Punch setting instead.", 38)
 
 addSwitch("Auto Brawl", false, function(on)
 	state.autoBrawl = on
